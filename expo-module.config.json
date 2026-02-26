@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ReactNativeLiquidAuthModule"]
+  },
+  "android": {
+    "modules": ["co.algorand.auth.ReactNativeLiquidAuthModule"]
+  }
+}

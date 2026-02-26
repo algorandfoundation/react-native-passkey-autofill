@@ -1,0 +1,10 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "react-native-liquid-auth": ["../src/index"],
+      "react-native-liquid-auth/*": ["../src/*"]
+    }
+  }
+}

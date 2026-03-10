@@ -19,7 +19,9 @@ config.resolver.nodeModulesPaths = [
 ];
 
 config.resolver.extraNodeModules = {
-  'react-native-liquid-auth': '..',
+  'react-native-passkey-autofill': '..',
+  'crypto': path.resolve(__dirname, 'node_modules', 'react-native-quick-crypto'),
+  'node:crypto': path.resolve(__dirname, 'node_modules', 'react-native-quick-crypto'),
 };
 
 config.watchFolders = [path.resolve(__dirname, '..')];

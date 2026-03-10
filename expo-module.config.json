@@ -1,9 +1,9 @@
 {
   "platforms": ["apple", "android", "web"],
   "apple": {
-    "modules": ["ReactNativeLiquidAuthModule"]
+    "modules": ["ReactNativePasskeyAutofillModule"]
   },
   "android": {
-    "modules": ["co.algorand.auth.ReactNativeLiquidAuthModule"]
+    "modules": ["co.algorand.passkeyautofill.ReactNativePasskeyAutofillModule"]
   }
 }

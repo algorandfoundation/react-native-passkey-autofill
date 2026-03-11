@@ -5,5 +5,6 @@
   },
   "android": {
     "modules": ["co.algorand.passkeyautofill.ReactNativePasskeyAutofillModule"]
-  }
+  },
+  "plugin": "./app.plugin.js"
 }

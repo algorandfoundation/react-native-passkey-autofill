@@ -27,6 +27,14 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "react-native-passkey-autofill",
+        {
+          "site": "https://fido.shore-tech.net"
+        }
+      ]
+    ]
   }
 }

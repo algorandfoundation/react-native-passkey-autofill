@@ -32,6 +32,7 @@
     "@algorandfoundation/react-native-keystore": "^1.0.0-canary.6"
   },
   "devDependencies": {
+    "@expo/config-plugins": "^9.0.0",
     "@types/react": "~19.1.1",
     "expo": "^55.0.1",
     "expo-module-scripts": "^55.0.2",

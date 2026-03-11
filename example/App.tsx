@@ -69,10 +69,10 @@ async function generateEd25519KeyPair() {
 
 type Account = {privateKey:  CryptoKey, publicKey: ArrayBuffer}
 export default function App() {
-  const onChangePayload = useEvent(ReactNativePasskeyAutofill, 'onChange');
   const [account, setAccount] = useState<Account | null>(null);
   const [xhdKeyId, setXhdKeyId] = useState<string | null>(null);
   const [xhdEd25519KeyId, setXhdEd25519KeyId] = useState<string | null>(null);
+  const [activePasskeyId, setActivePasskeyId] = useState<string | null>(null);
   const [keys, setKeys] = useState<Key[]>([]);
   const [status, setStatus] = useState(keyStore.state.status);
 
@@ -100,6 +100,11 @@ export default function App() {
                   },
                   publicKey: fromBase64Url(c.publicKey)
                 });
+                
+                // Select first passkey as active if not set
+                if (!activePasskeyId) {
+                  setActivePasskeyId(c.credentialId);
+                }
               });
             } catch (e) {
               console.warn('Failed to parse credentials:', e);
@@ -116,6 +121,14 @@ export default function App() {
             // Strip private keys/seeds for the reactive state
             const { privateKey, seed, ...keyMetadata } = data as any;
             loadedKeys.push(keyMetadata);
+
+            // Select active keys if not already set
+            if (keyMetadata.type === 'hd-derived-p256' && !xhdKeyId) {
+              setXhdKeyId(keyMetadata.id);
+            }
+            if (keyMetadata.type === 'hd-derived-ed25519' && !xhdEd25519KeyId) {
+              setXhdEd25519KeyId(keyMetadata.id);
+            }
           } catch (e) {
             console.warn(`Failed to decrypt key ${id}:`, e);
           }
@@ -161,12 +174,16 @@ export default function App() {
       'co.algorand.passkeyautofill.GET_PASSKEY',
       'co.algorand.passkeyautofill.CREATE_PASSKEY'
     ).catch(console.error);
+    
   }, []);
 
   const handleClearCredentials = async () => {
     try {
       provider.key.store.clear();
       keyStore.setState(s => ({ ...s, keys: [] }));
+      setXhdKeyId(null);
+      setXhdEd25519KeyId(null);
+      setActivePasskeyId(null);
       alert('Credentials and keys cleared');
     } catch (e) {
       alert('Failed to clear credentials: ' + e);
@@ -175,8 +192,13 @@ export default function App() {
 
   const handleCreatePasskey = async () => {
     try {
-      if (!account) {
+      if (!xhdEd25519KeyId) {
         alert('Account not ready');
+        return;
+      }
+      const ed25519Key = keys.find(k => k.id === xhdEd25519KeyId);
+      if(!ed25519Key) {
+        alert('Account not found');
         return;
       }
       const response = await fetch('https://fido.shore-tech.net/attestation/request', {
@@ -185,7 +207,7 @@ export default function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          "username": encodeAddress(new Uint8Array(account.publicKey)),
+          "username": encodeAddress(new Uint8Array(ed25519Key.publicKey)),
           "displayName": "Liquid Auth User",
           "authenticatorSelection": {
             "userVerification": "required"
@@ -205,8 +227,8 @@ export default function App() {
       console.log('Passkey creation result:', result);
 
       // If we have an Ed25519 key, add the liquid extension result to simulate the validation flow
-      if (xhdEd25519KeyId) {
-        const ed25519Key = keys.find(k => k.id === xhdEd25519KeyId);
+
+
         if (ed25519Key && ed25519Key.publicKey) {
           const challenge = fromBase64Url(options.challenge);
           const signature = await provider.key.store.sign(xhdEd25519KeyId, challenge);
@@ -224,7 +246,7 @@ export default function App() {
           };
           console.log('Added liquid extension to result:', result.clientExtensionResults.liquid);
         }
-      }
+
 
       // Submit the result to the debug service
       const submitResponse = await fetch('https://fido.shore-tech.net/attestation/response', {
@@ -339,6 +361,9 @@ export default function App() {
 
         <Group name="Functions">
           <View style={{ gap: 10 }}>
+            {activePasskeyId && <Text style={styles.credText}>Active Passkey: {activePasskeyId}</Text>}
+            {xhdEd25519KeyId && <Text style={styles.credText}>Active Ed25519: {xhdEd25519KeyId}</Text>}
+            {xhdKeyId && <Text style={styles.credText}>Active P256: {xhdKeyId}</Text>}
             <Button title="Create Passkey" onPress={handleCreatePasskey} />
             <Button title="Create XHD P256 Key" onPress={handleCreateXHDKey} color="green" />
             <Button title="Create XHD Ed25519 Key" onPress={handleCreateXHDEd25519Key} color="blue" />

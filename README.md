@@ -23,12 +23,23 @@ npm install react-native-passkey-autofill
 
 ### Configure for Android
 
+# Development
 
+### Installation
 
+```bash
+npm install
+```
 
-### Configure for iOS
+### Prebuild and run the example app
 
-Run `npx pod-install` after installing the npm package.
+```bash
+npm run build
+cd example
+npm install
+npx expo prebuild
+npm run android # for android
+```
 
 # Contributing
 

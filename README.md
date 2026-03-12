@@ -1,46 +1,56 @@
-# react-native-passkey-autofill
+# 🔑 react-native-passkey-autofill
 
-Passkey AutoFill React Native
+Passkey AutoFill for React Native using DP256.
 
-# API documentation
-
-- [Documentation for the latest stable release](https://docs.expo.dev/versions/latest/sdk/react-native-passkey-autofill/)
-- [Documentation for the main branch](https://docs.expo.dev/versions/unversioned/sdk/react-native-passkey-autofill/)
-
-# Installation in managed Expo projects
-
-For [managed](https://docs.expo.dev/archive/managed-vs-bare/) Expo projects, please follow the installation instructions in the [API documentation for the latest stable release](#api-documentation). If you follow the link and there is no documentation available then this library is not yet usable within managed projects &mdash; it is likely to be included in an upcoming Expo SDK release.
-
-# Installation in bare React Native projects
+# 🚀 Get Started
 
 For bare React Native projects, you must ensure that you have [installed and configured the `expo` package](https://docs.expo.dev/bare/installing-expo-modules/) before continuing.
 
 ### Add the package to your npm dependencies
 
-```
+```bash
 npm install react-native-passkey-autofill
 ```
 
 ### Configure for Android
 
-# Development
+To use this module on Android, you need to configure the AutoFill service in your `AndroidManifest.xml` or via the Expo plugin.
 
-### Installation
+## Usage
 
-```bash
-npm install
+```typescript
+import ReactNativePasskeyAutofill from 'react-native-passkey-autofill';
+
+// 1. Set the master key for encryption (hex string)
+await ReactNativePasskeyAutofill.setMasterKey(masterKeyHex);
+
+// 2. Set the HD root key ID if applicable
+await ReactNativePasskeyAutofill.setHdRootKeyId(hdRootKeyId);
+
+// 3. Configure intent actions for the Passkey flows
+await ReactNativePasskeyAutofill.configureIntentActions(
+  'your.package.name.GET_PASSKEY',
+  'your.package.name.CREATE_PASSKEY'
+);
+
+// Optional: Clear credentials
+await ReactNativePasskeyAutofill.clearCredentials();
 ```
 
-### Prebuild and run the example app
+# 🤝 Contributing
 
-```bash
-npm run build
-cd example
-npm install
-npx expo prebuild
-npm run android # for android
-```
+Contributions are very welcome! Please refer to guidelines described in the [contributing guide](./CONTRIBUTING.md).
 
-# Contributing
+# 💖 Acknowledgements
 
-Contributions are very welcome! Please refer to guidelines described in the [contributing guide]( https://github.com/expo/expo#contributing).
+This has been the commination of many different efforts and ideas. We would like to thank the following individuals and organizations for their contributions:
+
+- [Bruno Martins](https://github.com/bmartins) the architect at [Algorand Foundation](https://github.com/algorandfoundation) for conceptualizing and guiding the project.
+- [HashMapsData2Value](https://github.com/HashMapsData2Value) for his guidance and support in DP256 and XHD and his work on the native autofill libraries.
+- [Will Beaumont](https://github.com/mjbeau) for working though integration within the Pera wallet
+- [Michael T Chuang](https://github.com/michaeltchuang) for his work in KMP integrations and client libraries.
+
+## ❤️ Community
+
+[![stargazers](https://reporoster.com/stars/dark/algorandfoundation/liquid-auth-js)](https://github.com/algorandfoundation/liquid-auth-js/stargazers)
+[![forks](https://reporoster.com/forks/dark/algorandfoundation/liquid-auth-js)](https://github.com/algorandfoundation/liquid-auth-js/network/members)

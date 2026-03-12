@@ -53,13 +53,10 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginCreateCredentialResponse, CreateCredentialException>
     ) {
-        Log.d(TAG, "onBeginCreateCredentialRequest: $request")
         val response: BeginCreateCredentialResponse? = processCreateCredentialRequest(request)
         if (response != null) {
-            Log.d(TAG, "Returning BeginCreateCredentialResponse with ${response.createEntries.size} entries")
             callback.onResult(response)
         } else {
-            Log.d(TAG, "No suitable creation entries found, returning error")
             callback.onError(CreateCredentialUnknownException())
         }
     }
@@ -68,7 +65,6 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
      * Process incoming Create Credential Requests
      */
     private fun processCreateCredentialRequest(request: BeginCreateCredentialRequest): BeginCreateCredentialResponse? {
-        Log.d(TAG, "processCreateCredentialRequest type: ${request.javaClass.simpleName}")
         when (request) {
             is BeginCreatePublicKeyCredentialRequest -> {
                 return handleCreatePasskeyQuery(request)
@@ -86,22 +82,17 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
     private fun handleCreatePasskeyQuery(
         request: BeginCreatePublicKeyCredentialRequest
     ): BeginCreateCredentialResponse {
-        Log.d(TAG, "handleCreatePasskeyQuery: ${request.requestJson}")
-
         val createEntries: MutableList<CreateEntry> = mutableListOf()
         
         // Ensure we have a master key available before offering to create a passkey
         if (!credentialRepository.isMasterKeyAvailable(this)) {
-            Log.d(TAG, "Master key not available, not offering passkey creation")
             return BeginCreateCredentialResponse(createEntries)
         }
 
         val userJson = JSONObject(request.requestJson).optJSONObject("user")
         val name = userJson?.optString("name") ?: "New Passkey"
 
-        val mmkv = MMKV.mmkvWithID(CredentialRepository.MMKV_ID)
-        val action = mmkv.decodeString(CredentialRepository.CREATE_PASSKEY_ACTION_KEY) ?: DEFAULT_CREATE_PASSKEY_ACTION
-        Log.d(TAG, "Using action for create: $action")
+        val action = credentialRepository.getCreatePasskeyAction(this) ?: DEFAULT_CREATE_PASSKEY_ACTION
 
         val data = Bundle()
         data.putString("requestJson", request.requestJson)
@@ -124,10 +115,8 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginGetCredentialResponse, GetCredentialException>,
     ) {
-        Log.d(TAG, "onBeginGetCredentialRequest: $request")
         try {
             val response = processGetCredentialRequest(request)
-            Log.d(TAG, "Returning BeginGetCredentialResponse with ${response.credentialEntries.size} entries")
             callback.onResult(response)
         } catch (e: Exception) {
             Log.e(TAG, "Error in onBeginGetCredentialRequest", e)
@@ -139,22 +128,16 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
      * Fake a list of available PublicKeyCredential Entries
      */
     private fun processGetCredentialRequest(request: BeginGetCredentialRequest): BeginGetCredentialResponse{
-        Log.d(TAG, "processing GetCredentialRequest, options count: ${request.beginGetCredentialOptions.size}")
-        
         // Ensure we have a master key available. If not, we can't sign anything, so don't show entries.
         if (!credentialRepository.isMasterKeyAvailable(this)) {
-            Log.d(TAG, "Master key not available, returning empty BeginGetCredentialResponse")
             return BeginGetCredentialResponse(emptyList())
         }
 
         val credentials = runBlocking {
             credentialRepository.getAllCredentials(this@PasskeyAutofillCredentialProviderService)
         }
-        Log.d(TAG, "Found ${credentials.size} credentials in repository")
 
-        val mmkv = MMKV.mmkvWithID(CredentialRepository.MMKV_ID)
-        val action = mmkv.decodeString(CredentialRepository.GET_PASSKEY_ACTION_KEY) ?: DEFAULT_GET_PASSKEY_ACTION
-        Log.d(TAG, "Using action for get: $action")
+        val action = credentialRepository.getGetPasskeyAction(this) ?: DEFAULT_GET_PASSKEY_ACTION
 
         val entries = credentials.mapNotNull { credential ->
             try {
@@ -168,7 +151,6 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                 } as? BeginGetPublicKeyCredentialOption
 
                 if (option == null) {
-                    Log.w(TAG, "No BeginGetPublicKeyCredentialOption found in request")
                     return@mapNotNull null
                 }
 
@@ -186,7 +168,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                     .setIcon(Icon.createWithResource(this@PasskeyAutofillCredentialProviderService, android.R.drawable.ic_lock_lock))
                     .build()
             } catch (e: Exception) {
-                Log.e(TAG, "Error building PublicKeyCredentialEntry for ${credential.userHandle}", e)
+                Log.e(TAG, "Error building PublicKeyCredentialEntry", e)
                 null
             }
         }
@@ -197,7 +179,6 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<Void?, ClearCredentialException>
     ) {
-        Log.d(TAG, "onClearCredentialStateRequest")
         // TODO: Implement clear credential state if needed
         callback.onResult(null)
     }
@@ -224,7 +205,6 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         // Add categories that might be required
         intent.addCategory(android.content.Intent.CATEGORY_DEFAULT)
         
-        Log.d(TAG, "Creating PendingIntent for action: $action, component: $componentName")
         return PendingIntent.getActivity(
             applicationContext, requestCode,
             intent, (PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

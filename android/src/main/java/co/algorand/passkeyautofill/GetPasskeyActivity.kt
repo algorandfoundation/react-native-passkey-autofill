@@ -21,8 +21,7 @@ import androidx.credentials.webauthn.PublicKeyCredentialRequestOptions
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import java.security.KeyPair
-import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
+import android.util.Base64 as AndroidBase64
 import org.json.JSONObject
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
@@ -38,7 +37,6 @@ class GetPasskeyActivity : AppCompatActivity() {
     private var credentialIdEnc: String? = null
     private var request: ProviderGetCredentialRequest? = null
 
-    @OptIn(ExperimentalEncodingApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -82,14 +80,13 @@ class GetPasskeyActivity : AppCompatActivity() {
     }
 
     @SuppressLint("RestrictedApi")
-    @OptIn(ExperimentalEncodingApi::class)
     private fun handleAssertion() {
         try {
             val req = request ?: throw IllegalStateException("No request found")
             val option = req.credentialOptions[0] as GetPublicKeyCredentialOption
             val requestOptions = PublicKeyCredentialRequestOptions(option.requestJson)
             
-            val credId = Base64.decode(credentialIdEnc!!)
+            val credId = AndroidBase64.decode(credentialIdEnc!!, AndroidBase64.DEFAULT)
             val clientDataHash = option.requestData.getByteArray("androidx.credentials.BUNDLE_KEY_CLIENT_DATA_HASH")
                 ?: throw IllegalStateException("Missing clientDataHash")
             
@@ -104,7 +101,7 @@ class GetPasskeyActivity : AppCompatActivity() {
                 uv = true,
                 be = true,
                 bs = true,
-                userHandle = Base64.UrlSafe.decode(dbCred.userId),
+                userHandle = AndroidBase64.decode(dbCred.userId, AndroidBase64.URL_SAFE),
                 packageName = req.callingAppInfo.packageName,
                 clientDataHash = clientDataHash
             )
@@ -146,10 +143,9 @@ class GetPasskeyActivity : AppCompatActivity() {
         finish()
     }
 
-    @OptIn(ExperimentalEncodingApi::class)
     private fun getClientDataJSONb64(origin: String, challenge: String): String {
         val sanitizedOrigin = origin.replace(Regex("/$"), "")
         val jsonString = "{\"type\":\"webauthn.get\",\"challenge\":\"$challenge\",\"origin\":\"$sanitizedOrigin\",\"crossOrigin\":false}"
-        return Base64.encode(jsonString.toByteArray())
+        return AndroidBase64.encodeToString(jsonString.toByteArray(), AndroidBase64.NO_WRAP)
     }
 }

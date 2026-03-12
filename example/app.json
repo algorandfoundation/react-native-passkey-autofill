@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "react-native-liquid-auth-example",
-    "slug": "react-native-liquid-auth-example",
+    "name": "Passkey Autofill Example",
+    "slug": "passkey-autofill-example",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

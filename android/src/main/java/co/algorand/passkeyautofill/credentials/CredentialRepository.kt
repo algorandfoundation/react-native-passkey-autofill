@@ -1,28 +1,28 @@
 package co.algorand.passkeyautofill.credentials
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
+import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.credentials.provider.CallingAppInfo
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.tencent.mmkv.MMKV
 import foundation.algorand.deterministicP256.DeterministicP256
 import java.security.*
 import java.security.spec.*
 import javax.crypto.Cipher
+import javax.crypto.CipherOutputStream
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import android.util.Base64 as AndroidBase64
+import java.io.ByteArrayOutputStream
+import java.security.SecureRandom
 
-private val Context.keychainDataStore by preferencesDataStore(name = "RN_KEYCHAIN")
 
 interface CredentialRepository {
     val keyStore: KeyStore
@@ -38,16 +38,24 @@ interface CredentialRepository {
     fun getPublicKeyFromKeyPair(keyPair: KeyPair?): ByteArray
     fun sign(keyPair: KeyPair, payload: ByteArray): ByteArray
     fun isMasterKeyAvailable(context: Context): Boolean
+    fun saveMasterKey(context: Context, secret: String)
+    fun saveHdRootKeyId(context: Context, id: String)
+    fun getHdRootKeyId(context: Context): String?
+    fun configureIntentActions(context: Context, getPasskeyAction: String, createPasskeyAction: String)
+    fun getCreatePasskeyAction(context: Context): String?
+    fun getGetPasskeyAction(context: Context): String?
+    fun clearCredentials(context: Context)
 
     companion object {
         const val TAG = "CredentialRepository"
-        const val MMKV_ID = "keystore"
+        const val PASSKEYS_MMKV_ID = "keystore"
         const val CREDENTIALS_KEY = "credentials"
-        const val PARENT_SECRET_KEY = "parent_secret"
         const val GET_PASSKEY_ACTION_KEY = "get_passkey_action"
         const val CREATE_PASSKEY_ACTION_KEY = "create_passkey_action"
-        const val MASTER_KEY_SERVICE = "app-secret"
-        const val KEYCHAIN_STORAGE_NAME = "RN_KEYCHAIN"
+        const val MASTER_KEY_ALIAS = "co.algorand.passkeyautofill.masterkey"
+        const val KEYCHAIN_STORAGE_NAME = "PasskeyAutofillKeychain"
+        const val PASSKEY_AUTOFILL_MMKV_ID = "passkey_autofill"
+        const val HD_ROOT_KEY_ID_KEY = "hd_root_key_id"
     }
 }
 
@@ -61,75 +69,129 @@ class Repository() : CredentialRepository {
         keyStore.load(null)
     }
 
-    private fun getMMKV(context: Context): MMKV {
+    private fun getPasskeysMMKV(context: Context): MMKV {
         MMKV.initialize(context)
-        return MMKV.mmkvWithID(CredentialRepository.MMKV_ID)
+        // Entry-level encryption (AES-256-GCM) is used for individual keys.
+        return MMKV.mmkvWithID(CredentialRepository.PASSKEYS_MMKV_ID, MMKV.MULTI_PROCESS_MODE)
     }
 
-    @OptIn(ExperimentalEncodingApi::class)
+    private fun getAutofillMMKV(context: Context): MMKV {
+        MMKV.initialize(context)
+        return MMKV.mmkvWithID(CredentialRepository.PASSKEY_AUTOFILL_MMKV_ID, MMKV.MULTI_PROCESS_MODE)
+    }
+
     override fun saveCredential(context: Context, credential: Credential) {
-        Log.d(CredentialRepository.TAG, "saveCredential($credential)")
-        val mmkv = getMMKV(context)
-        val credentials = getAllCredentials(context).toMutableList()
-        credentials.removeAll { it.credentialId == credential.credentialId }
-        credentials.add(credential)
+        val mmkv = getPasskeysMMKV(context)
         
-        val jsonArray = JSONArray()
-        credentials.forEach {
-            val json = JSONObject()
-            json.put("credentialId", it.credentialId)
-            json.put("origin", it.origin)
-            json.put("userHandle", it.userHandle)
-            json.put("userId", it.userId)
-            json.put("publicKey", it.publicKey)
-            json.put("privateKey", it.privateKey)
-            json.put("count", it.count)
-            jsonArray.put(json)
+        // 1. Create KeyData matching @algorandfoundation/keystore
+        val keyData = JSONObject()
+        keyData.put("id", credential.credentialId)
+        keyData.put("type", "hd-derived-p256")
+        keyData.put("algorithm", "P256")
+        keyData.put("extractable", false)
+        keyData.put("keyUsages", JSONArray(listOf("sign")))
+        keyData.put("name", "Passkey: ${credential.origin}")
+        keyData.put("privateKey", JSONArray(AndroidBase64.decode(credential.privateKey, AndroidBase64.DEFAULT).map { it.toInt() and 0xFF }))
+        keyData.put("publicKey", JSONArray(AndroidBase64.decode(credential.publicKey, AndroidBase64.DEFAULT).map { it.toInt() and 0xFF }))
+        
+        // Custom fields for our use
+        val metadata = JSONObject()
+        metadata.put("origin", credential.origin)
+        metadata.put("userHandle", credential.userHandle)
+        metadata.put("userId", credential.userId)
+        metadata.put("count", credential.count)
+        keyData.put("metadata", metadata)
+
+        // 2. Encode matching react-native-keystore's encode()
+        val jsonString = keyData.toString()
+        val base64urlJson = AndroidBase64.encodeToString(jsonString.toByteArray(Charsets.UTF_8), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
+
+        // 3. Encrypt matching react-native-keystore's commit()
+        val masterKey = getMasterKey(context)
+        if (masterKey != null) {
+            val encryptedPayload = encryptData(masterKey, base64urlJson)
+            mmkv.encode(credential.credentialId, encryptedPayload)
+        } else {
+            Log.w(CredentialRepository.TAG, "Master key not available for encrypting credential, saving encoded only")
+            mmkv.encode(credential.credentialId, base64urlJson)
         }
-        mmkv.encode(CredentialRepository.CREDENTIALS_KEY, jsonArray.toString())
     }
 
     override fun getAllCredentials(context: Context): List<Credential> {
-        val mmkv = getMMKV(context)
-        val jsonString = mmkv.decodeString(CredentialRepository.CREDENTIALS_KEY) ?: return emptyList()
-        val jsonArray = JSONArray(jsonString)
+        val mmkv = getPasskeysMMKV(context)
+        val allKeys = mmkv.allKeys() ?: return emptyList()
         val credentials = mutableListOf<Credential>()
-        for (i in 0 until jsonArray.length()) {
-            val json = jsonArray.getJSONObject(i)
-            credentials.add(Credential(
-                credentialId = json.getString("credentialId"),
-                origin = json.getString("origin"),
-                userHandle = json.getString("userHandle"),
-                userId = json.getString("userId"),
-                publicKey = json.getString("publicKey"),
-                privateKey = json.getString("privateKey"),
-                count = json.getInt("count")
-            ))
+        
+        val masterKey = getMasterKey(context) ?: return emptyList()
+
+        for (key in allKeys) {
+            val payload = mmkv.decodeString(key) ?: continue
+            try {
+                val json = decodeKeyData(payload, masterKey)
+                // Basic validation to ensure it's a credential
+                if (json.has("id") && (json.has("origin") || json.has("metadata"))) {
+                    val metadata = json.optJSONObject("metadata")
+                    credentials.add(Credential(
+                        credentialId = json.getString("id"),
+                        origin = metadata?.optString("origin") ?: json.optString("origin", ""),
+                        userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
+                        userId = metadata?.optString("userId") ?: json.optString("userId", ""),
+                        publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
+                        privateKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT),
+                        count = metadata?.optInt("count") ?: json.optInt("count", 0)
+                    ))
+                }
+            } catch (e: Exception) {
+                // Not a JSON or not a credential or decryption failed, skip
+                continue
+            }
         }
         return credentials
     }
 
+    private fun jsonArrayToByteArray(array: JSONArray): ByteArray {
+        val bytes = ByteArray(array.length())
+        for (i in 0 until array.length()) {
+            bytes[i] = array.getInt(i).toByte()
+        }
+        return bytes
+    }
+
     override fun generateCredentialId(keyPair: KeyPair): ByteArray {
-        Log.d(CredentialRepository.TAG, "generateCredentialId()")
         val publicKeyBytes = keyPair.public.encoded
         val messageDigest = MessageDigest.getInstance("SHA-256")
         return messageDigest.digest(publicKeyBytes)
     }
 
-    @OptIn(ExperimentalEncodingApi::class)
     override fun getCredential(context: Context, credentialId: ByteArray): Credential? {
-        val id = Base64.encode(credentialId)
-        return getAllCredentials(context).find { it.credentialId == id }
+        val id = AndroidBase64.encodeToString(credentialId, AndroidBase64.DEFAULT).trim()
+        val mmkv = getPasskeysMMKV(context)
+        val payload = mmkv.decodeString(id) ?: return null
+        val masterKey = getMasterKey(context) ?: return null
+        return try {
+            val json = decodeKeyData(payload, masterKey)
+            val metadata = json.optJSONObject("metadata")
+            Credential(
+                credentialId = json.getString("id"),
+                origin = metadata?.optString("origin") ?: json.optString("origin", ""),
+                userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
+                userId = metadata?.optString("userId") ?: json.optString("userId", ""),
+                publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
+                privateKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT),
+                count = metadata?.optInt("count") ?: json.optInt("count", 0)
+            )
+        } catch (e: Exception) {
+            null
+        }
     }
 
     override fun getCredentialByOrigin(context: Context, origin: String): Credential? {
         return getAllCredentials(context).find { it.origin == origin }
     }
 
-    @OptIn(ExperimentalEncodingApi::class)
     fun getKeyPairFromCredential(credential: Credential): KeyPair? {
-        val publicKeyBytes = Base64.decode(credential.publicKey)
-        val privateKeyBytes = Base64.decode(credential.privateKey)
+        val publicKeyBytes = AndroidBase64.decode(credential.publicKey, AndroidBase64.DEFAULT)
+        val privateKeyBytes = AndroidBase64.decode(credential.privateKey, AndroidBase64.DEFAULT)
         val factory = KeyFactory.getInstance("EC")
         val publicKey = factory.generatePublic(X509EncodedKeySpec(publicKeyBytes))
         val privateKey = factory.generatePrivate(PKCS8EncodedKeySpec(privateKeyBytes))
@@ -146,113 +208,237 @@ class Repository() : CredentialRepository {
         origin: String,
         userHandle: String
     ): KeyPair {
-        Log.d(CredentialRepository.TAG, "createDeterministicKeyPair($context, $origin, ${userHandle.lowercase()})")
-
-        val mmkv = getMMKV(context)
-        val parentSecretHex = mmkv.decodeString(CredentialRepository.PARENT_SECRET_KEY)
-        Log.d(CredentialRepository.TAG, "createDeterministicKeyPair: parentSecretHex=${parentSecretHex != null}")
-        val derivedParentSecret = if (parentSecretHex != null) {
-            hexToBytes(parentSecretHex)
-        } else {
-            val fromKeychain = getMasterKeyFromKeychain(context)
-            if (fromKeychain != null) {
-                // Persist to MMKV for future use by the service
-                mmkv.encode(CredentialRepository.PARENT_SECRET_KEY, bytesToHex(fromKeychain))
-                Log.d(CredentialRepository.TAG, "Persisted master key from Keychain to MMKV")
+        val masterKey = getMasterKey(context) ?: throw IllegalStateException("Master key not found in Keystore. Ensure you have called setMasterKey(key) from JavaScript.")
+        
+        val mmkvAutofill = getAutofillMMKV(context)
+        val hdRootKeyId = mmkvAutofill.decodeString(CredentialRepository.HD_ROOT_KEY_ID_KEY) ?: throw IllegalStateException("HD Root Key ID not found. Ensure you have called setHdRootKeyId(id) from JavaScript.")
+        
+        val mmkvKeystore = getPasskeysMMKV(context)
+        val hdRootKeyPayload = mmkvKeystore.decodeString(hdRootKeyId) ?: throw IllegalStateException("HD Root Key not found in keystore for ID: $hdRootKeyId")
+        
+        val hdRootKeyData = decodeKeyData(hdRootKeyPayload, masterKey)
+        
+        // In react-native-keystore, the private key/seed are stored as arrays of numbers in JSON
+        // due to how JSON.stringify handles Uint8Array.
+        // Our decode method in decryptHdRootKey might have already handled it if it matched react-native-keystore's decode.
+        
+        val seedArray = hdRootKeyData.optJSONArray("seed") ?: hdRootKeyData.optJSONArray("privateKey")
+        val derivedParentSecret = if (seedArray != null) {
+            val bytes = ByteArray(seedArray.length())
+            for (i in 0 until seedArray.length()) {
+                bytes[i] = seedArray.getInt(i).toByte()
             }
-            fromKeychain ?: throw IllegalStateException("Parent secret not found in MMKV or Keychain. Ensure you have called setParentSecret(key) from JavaScript or that react-native-keychain is correctly configured.")
+            bytes
+        } else {
+            val seed = (if (hdRootKeyData.has("seed")) hdRootKeyData.getString("seed") else null)
+                ?: (if (hdRootKeyData.has("privateKey")) hdRootKeyData.getString("privateKey") else null)
+                ?: throw IllegalStateException("HD Root Key does not contain a seed or privateKey")
+            
+            if (seed.startsWith("0x")) {
+                hexToBytes(seed.substring(2))
+            } else {
+                // It might be base64url encoded or just hex
+                try {
+                    hexToBytes(seed)
+                } catch (e: Exception) {
+                    AndroidBase64.decode(seed, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
+                }
+            }
         }
 
         return dP256.genDomainSpecificKeypair(derivedParentSecret, origin, userHandle.lowercase())
     }
 
-    override fun isMasterKeyAvailable(context: Context): Boolean {
-        val mmkv = getMMKV(context)
-        if (mmkv.decodeString(CredentialRepository.PARENT_SECRET_KEY) != null) return true
-        val fromKeychain = getMasterKeyFromKeychain(context)
-        if (fromKeychain != null) {
-            // Persist to MMKV for future use by the service
-            mmkv.encode(CredentialRepository.PARENT_SECRET_KEY, bytesToHex(fromKeychain))
-            Log.d(CredentialRepository.TAG, "Persisted master key from Keychain to MMKV during availability check")
-            return true
-        }
-        return false
+    private fun encryptData(key: ByteArray, data: String): String {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val iv = ByteArray(12)
+        SecureRandom().nextBytes(iv)
+        
+        val keySpec = javax.crypto.spec.SecretKeySpec(key, "AES")
+        val gcmSpec = GCMParameterSpec(128, iv)
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec, gcmSpec)
+        
+        val encryptedWithTag = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
+        
+        // In GCM mode, the tag is at the end of the ciphertext returned by doFinal
+        val tagSize = 16
+        val contentSize = encryptedWithTag.size - tagSize
+        val content = encryptedWithTag.sliceArray(0 until contentSize)
+        val tag = encryptedWithTag.sliceArray(contentSize until encryptedWithTag.size)
+        
+        val json = JSONObject()
+        // Use NO_WRAP consistently to avoid newlines, but ensure standard base64 for compatibility
+        json.put("iv", AndroidBase64.encodeToString(iv, AndroidBase64.NO_WRAP))
+        json.put("tag", AndroidBase64.encodeToString(tag, AndroidBase64.NO_WRAP))
+        json.put("content", AndroidBase64.encodeToString(content, AndroidBase64.NO_WRAP))
+        
+        return json.toString()
     }
 
-    private fun getMasterKeyFromKeychain(context: Context): ByteArray? {
-        val service = CredentialRepository.MASTER_KEY_SERVICE
-        val keychainData = CredentialRepository.KEYCHAIN_STORAGE_NAME
-        
-        Log.d(CredentialRepository.TAG, "Attempting to retrieve master key from Keychain (service: $service, storage: $keychainData)")
-
-        // 1. Try reading from SharedPreferences (Legacy/Fallback)
-        val prefs = context.getSharedPreferences(keychainData, Context.MODE_PRIVATE)
-        var encryptedPasswordBase64 = prefs.getString("$service:p", null)
-        var cipherName = prefs.getString("$service:c", null)
-        
-        Log.d(CredentialRepository.TAG, "SharedPreferences: encryptedPasswordBase64=${encryptedPasswordBase64 != null}, cipherName=$cipherName")
-
-        // 2. Try reading from DataStore if not found in SharedPreferences
-        if (encryptedPasswordBase64 == null) {
-            try {
-                Log.d(CredentialRepository.TAG, "Checking DataStore for $service")
-                // DataStore is async, use runBlocking to fetch it synchronously
-                val preferences = runBlocking { 
-                    context.keychainDataStore.data.first() 
-                }
-                encryptedPasswordBase64 = preferences[stringPreferencesKey("$service:p")]
-                cipherName = preferences[stringPreferencesKey("$service:c")]
-                Log.d(CredentialRepository.TAG, "DataStore: encryptedPasswordBase64=${encryptedPasswordBase64 != null}, cipherName=$cipherName")
-            } catch (e: Exception) {
-                Log.e(CredentialRepository.TAG, "Error reading from DataStore", e)
-            }
-        }
-        
-        if (encryptedPasswordBase64 == null || cipherName == null) {
-            Log.d(CredentialRepository.TAG, "Master key not found in Keychain storage")
-            return null
-        }
-        
-        // 3. Decrypt using Android KeyStore
+    private fun decodeKeyData(payload: String, masterKey: ByteArray?): JSONObject {
         try {
-            if (cipherName == "KeystoreAESGCM_NoAuth" || cipherName == "KeystoreAESGCM") {
-                Log.d(CredentialRepository.TAG, "Cipher $cipherName is supported, decrypting...")
-                val encryptedBytes = AndroidBase64.decode(encryptedPasswordBase64, AndroidBase64.DEFAULT)
-                Log.d(CredentialRepository.TAG, "Encrypted bytes length: ${encryptedBytes.size}")
-                if (encryptedBytes.size < 12) {
-                    Log.e(CredentialRepository.TAG, "Encrypted bytes too short (min 12 for IV)")
-                    return null
+            // Check if it's the old encrypted format (starts with { and has iv, tag, content)
+            if (payload.startsWith("{")) {
+                val json = JSONObject(payload)
+                if (json.has("iv") && json.has("tag") && json.has("content")) {
+                    if (masterKey == null) throw IllegalStateException("Master key required for legacy decryption")
+
+                    val iv = AndroidBase64.decode(json.getString("iv"), AndroidBase64.DEFAULT)
+                    val tag = AndroidBase64.decode(json.getString("tag"), AndroidBase64.DEFAULT)
+                    val content = AndroidBase64.decode(json.getString("content"), AndroidBase64.DEFAULT)
+
+                    val keySpec = javax.crypto.spec.SecretKeySpec(masterKey, "AES")
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    val gcmSpec = GCMParameterSpec(128, iv)
+                    cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
+
+                    val combined = content + tag
+                    val decryptedBytes = cipher.doFinal(combined)
+                    val decryptedString = String(decryptedBytes, Charsets.UTF_8)
+
+                    // The decrypted bytes are base64url encoded JSON
+                    val decodedJsonBytes = try {
+                        AndroidBase64.decode(decryptedString, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
+                    } catch (e: Exception) {
+                        decryptedString.toByteArray(Charsets.UTF_8)
+                    }
+                    return JSONObject(String(decodedJsonBytes, Charsets.UTF_8))
                 }
-                
-                val iv = encryptedBytes.sliceArray(0 until 12)
-                val data = encryptedBytes.sliceArray(12 until encryptedBytes.size)
-                
-                val ks = KeyStore.getInstance("AndroidKeyStore")
-                ks.load(null)
-                
-                // Alias is the service name "app-secret"
-                val key = ks.getKey(service, null)
-                if (key == null) {
-                    Log.e(CredentialRepository.TAG, "Key not found in Keystore for alias: $service")
-                    return null
-                }
-                
-                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                val spec = GCMParameterSpec(128, iv)
-                cipher.init(Cipher.DECRYPT_MODE, key, spec)
-                
-                val decryptedBytes = cipher.doFinal(data)
-                val hexKey = String(decryptedBytes, Charsets.UTF_8)
-                Log.d(CredentialRepository.TAG, "Successfully decrypted master key from Keychain")
-                return hexToBytes(hexKey)
+                return json
+            }
+
+            // New format: base64url encoded JSON (MMKV handles the encryption/decryption of this string)
+            val decodedBytes = AndroidBase64.decode(payload, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
+            return JSONObject(String(decodedBytes, Charsets.UTF_8))
+        } catch (e: Exception) {
+            Log.e(CredentialRepository.TAG, "Failed to decode payload", e)
+            throw e
+        }
+    }
+
+    override fun saveMasterKey(context: Context, secret: String) {
+        
+        // Convert hex string to bytes if it's a valid hex string of appropriate length
+        val keyBytes = try {
+            if ((secret.length == 64 || secret.length == 32) && secret.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                hexToBytes(secret.trim())
             } else {
-                Log.w(CredentialRepository.TAG, "Unsupported cipher: $cipherName")
+                secret.toByteArray(Charsets.UTF_8)
             }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Error decrypting master key from Keychain", e)
+            secret.toByteArray(Charsets.UTF_8)
         }
+
+        // Store in our separate Keychain for persistence
+        try {
+            encryptToKeychain(context, keyBytes)
+        } catch (e: Exception) {
+            Log.e(CredentialRepository.TAG, "Failed to save master key to Keychain", e)
+        }
+    }
+
+    private fun getMasterKey(context: Context): ByteArray? {
+        // Try our separate Keychain storage
+        return try {
+            val decrypted = decryptFromKeychain(context)
+            if (decrypted != null) {
+                // Return the raw bytes directly as they were already processed during save
+                decrypted
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(CredentialRepository.TAG, "Failed to get master key from Keychain", e)
+            null
+        }
+    }
+
+    private fun getSecretKey(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore")
+        ks.load(null)
+        if (!ks.containsAlias(CredentialRepository.MASTER_KEY_ALIAS)) {
+            val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            keyGenerator.init(
+                KeyGenParameterSpec.Builder(CredentialRepository.MASTER_KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .build()
+            )
+            keyGenerator.generateKey()
+        }
+        return ks.getKey(CredentialRepository.MASTER_KEY_ALIAS, null) as SecretKey
+    }
+
+    private fun encryptToKeychain(context: Context, data: ByteArray) {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
+        val iv = cipher.iv
+        val encryptedData = cipher.doFinal(data)
         
-        return null
+        val prefs = context.getSharedPreferences(CredentialRepository.KEYCHAIN_STORAGE_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("iv", AndroidBase64.encodeToString(iv, AndroidBase64.NO_WRAP))
+            .putString("content", AndroidBase64.encodeToString(encryptedData, AndroidBase64.NO_WRAP))
+            .apply()
+    }
+
+    private fun decryptFromKeychain(context: Context): ByteArray? {
+        val prefs = context.getSharedPreferences(CredentialRepository.KEYCHAIN_STORAGE_NAME, Context.MODE_PRIVATE)
+        val ivStr = prefs.getString("iv", null) ?: return null
+        val contentStr = prefs.getString("content", null) ?: return null
+        
+        val iv = AndroidBase64.decode(ivStr, AndroidBase64.NO_WRAP)
+        val content = AndroidBase64.decode(contentStr, AndroidBase64.NO_WRAP)
+        
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val gcmSpec = GCMParameterSpec(128, iv)
+        cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), gcmSpec)
+        
+        return cipher.doFinal(content)
+    }
+
+    override fun isMasterKeyAvailable(context: Context): Boolean {
+        return getMasterKey(context) != null
+    }
+
+    override fun saveHdRootKeyId(context: Context, id: String) {
+        val mmkv = getAutofillMMKV(context)
+        mmkv.encode(CredentialRepository.HD_ROOT_KEY_ID_KEY, id)
+    }
+
+    override fun getHdRootKeyId(context: Context): String? {
+        val mmkv = getAutofillMMKV(context)
+        return mmkv.decodeString(CredentialRepository.HD_ROOT_KEY_ID_KEY)
+    }
+
+    override fun configureIntentActions(context: Context, getPasskeyAction: String, createPasskeyAction: String) {
+        val mmkv = getAutofillMMKV(context)
+        mmkv.encode(CredentialRepository.GET_PASSKEY_ACTION_KEY, getPasskeyAction)
+        mmkv.encode(CredentialRepository.CREATE_PASSKEY_ACTION_KEY, createPasskeyAction)
+    }
+
+    override fun getCreatePasskeyAction(context: Context): String? {
+        val mmkv = getAutofillMMKV(context)
+        return mmkv.decodeString(CredentialRepository.CREATE_PASSKEY_ACTION_KEY)
+    }
+
+    override fun getGetPasskeyAction(context: Context): String? {
+        val mmkv = getAutofillMMKV(context)
+        return mmkv.decodeString(CredentialRepository.GET_PASSKEY_ACTION_KEY)
+    }
+
+    override fun clearCredentials(context: Context) {
+        try {
+            val mmkvAutofill = getAutofillMMKV(context)
+            mmkvAutofill.clearAll()
+            
+            val mmkvPasskeys = getPasskeysMMKV(context)
+            mmkvPasskeys.clearAll()
+
+        } catch (e: Exception) {
+            Log.e(CredentialRepository.TAG, "Error clearing credentials and secrets", e)
+        }
     }
 
     private fun hexToBytes(hex: String): ByteArray {
@@ -310,12 +496,11 @@ class Repository() : CredentialRepository {
         }
     }
 
-    @OptIn(ExperimentalEncodingApi::class)
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     override fun appInfoToOrigin(info: CallingAppInfo): String {
         val cert = info.signingInfo.apkContentsSigners[0].toByteArray()
         val md = MessageDigest.getInstance("SHA-256")
         val certHash = md.digest(cert)
-        return "android:apk-key-hash:${Base64.UrlSafe.encode(certHash).replace("=", "")}"
+        return "android:apk-key-hash:${AndroidBase64.encodeToString(certHash, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING)}"
     }
 }

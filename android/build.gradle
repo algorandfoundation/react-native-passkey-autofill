@@ -40,6 +40,9 @@ android {
   lintOptions {
     abortOnError false
   }
+  kotlinOptions {
+    freeCompilerArgs += ["-opt-in=kotlin.time.ExperimentalTime", "-opt-in=kotlin.RequiresOptIn"]
+  }
 }
 
 dependencies {

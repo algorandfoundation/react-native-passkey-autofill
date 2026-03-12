@@ -20,8 +20,7 @@ import androidx.credentials.webauthn.PublicKeyCredentialCreationOptions
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import java.security.KeyPair
-import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
+import android.util.Base64 as AndroidBase64
 import org.json.JSONObject
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
@@ -38,7 +37,6 @@ class CreatePasskeyActivity : AppCompatActivity() {
     private var userId: String = "unknown-id"
     private var request: ProviderCreateCredentialRequest? = null
 
-    @OptIn(ExperimentalEncodingApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -47,7 +45,11 @@ class CreatePasskeyActivity : AppCompatActivity() {
             try {
                 val publicKeyRequest = request!!.callingRequest as CreatePublicKeyCredentialRequest
                 val requestJson = JSONObject(publicKeyRequest.requestJson)
-                origin = credentialRepository.getOrigin(request!!.callingAppInfo)
+                
+                // Use RP ID as origin for derivation if available, otherwise fallback to app signature
+                val rpId = requestJson.optJSONObject("rp")?.optString("id")
+                origin = rpId ?: credentialRepository.getOrigin(request!!.callingAppInfo)
+                
                 val userJson = requestJson.optJSONObject("user")
                 userHandle = userJson?.optString("name") ?: "unknown-user"
                 userName = userJson?.optString("displayName") ?: userHandle
@@ -88,7 +90,6 @@ class CreatePasskeyActivity : AppCompatActivity() {
     }
 
     @SuppressLint("RestrictedApi")
-    @OptIn(ExperimentalEncodingApi::class)
     private fun handleCreation() {
         try {
             val req = request ?: throw IllegalStateException("No request found")
@@ -97,15 +98,15 @@ class CreatePasskeyActivity : AppCompatActivity() {
 
             val keyPair: KeyPair = credentialRepository.createDeterministicKeyPair(this, origin, userHandle)
             val credentialId = credentialRepository.generateCredentialId(keyPair)
-            val credentialIdBase64 = Base64.encode(credentialId)
+            val credentialIdBase64 = AndroidBase64.encodeToString(credentialId, AndroidBase64.NO_WRAP)
 
             val credential = Credential(
                 credentialId = credentialIdBase64,
                 origin = origin,
                 userHandle = userHandle,
                 userId = userId,
-                publicKey = Base64.encode(keyPair.public.encoded),
-                privateKey = Base64.encode(keyPair.private.encoded),
+                publicKey = AndroidBase64.encodeToString(keyPair.public.encoded, AndroidBase64.NO_WRAP),
+                privateKey = AndroidBase64.encodeToString(keyPair.private.encoded, AndroidBase64.NO_WRAP),
                 count = 0
             )
             
@@ -130,7 +131,25 @@ class CreatePasskeyActivity : AppCompatActivity() {
             )
 
             val resultIntent = Intent()
-            val createResponse = CreatePublicKeyCredentialResponse(fidoCredential.json())
+            val responseJson = JSONObject(fidoCredential.json())
+            val passkeyDetails = JSONObject()
+            
+            val ecPubKey = keyPair.public as java.security.interfaces.ECPublicKey
+            val ecPrivKey = keyPair.private as java.security.interfaces.ECPrivateKey
+            
+            fun to32(bi: java.math.BigInteger): ByteArray {
+                var ba = bi.toByteArray()
+                if (ba.size < 32) {
+                    ba = ByteArray(32 - ba.size) + ba
+                }
+                return ba.copyOfRange(ba.size - 32, ba.size)
+            }
+            
+            val x = to32(ecPubKey.w.affineX)
+            val y = to32(ecPubKey.w.affineY)
+            val s = to32(ecPrivKey.s)
+
+            val createResponse = CreatePublicKeyCredentialResponse(responseJson.toString())
             
             PendingIntentHandler.setCreateCredentialResponse(
                 resultIntent,

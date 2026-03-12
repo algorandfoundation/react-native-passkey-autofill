@@ -26,54 +26,45 @@ class ReactNativePasskeyAutofillModule : Module() {
     // The module will be accessible from `requireNativeModule('ReactNativeLiquidAuth')` in JavaScript.
     Name("ReactNativePasskeyAutofill")
 
-    // Defines constant property on the module.
-    Constant("PI") {
-      Math.PI
-    }
-
-    // Defines event names that the module can send to JavaScript.
-    Events("onChange")
-
-    // Defines a JavaScript synchronous function that runs the native code on the JavaScript thread.
-    Function("hello") {
-      "Hello world! 👋"
-    }
-
-    AsyncFunction("setParentSecret") { secret: String ->
+    AsyncFunction("setMasterKey") { secret: String ->
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
       if (context != null) {
-        MMKV.initialize(context)
+        credentialRepository.saveMasterKey(context, secret)
+      } else {
+        Log.e(CredentialRepository.TAG, "Could not get context to save master key")
       }
-      val mmkv = MMKV.mmkvWithID(CredentialRepository.MMKV_ID)
-      mmkv.encode(CredentialRepository.PARENT_SECRET_KEY, secret)
-      Log.d(CredentialRepository.TAG, "Parent secret synced to MMKV (length: ${secret.length})")
+    }
+
+    AsyncFunction("setHdRootKeyId") { id: String ->
+      val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
+      if (context != null) {
+        credentialRepository.saveHdRootKeyId(context, id)
+      } else {
+        Log.e(CredentialRepository.TAG, "Could not get context to save HD root key ID")
+      }
+    }
+
+    AsyncFunction("getHdRootKeyId") {
+      val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
+      if (context != null) {
+        credentialRepository.getHdRootKeyId(context)
+      } else {
+        Log.e(CredentialRepository.TAG, "Could not get context to get HD root key ID")
+        null
+      }
     }
 
     AsyncFunction("clearCredentials") {
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
         ?: return@AsyncFunction Unit
-      MMKV.initialize(context)
-      val mmkv = MMKV.mmkvWithID(CredentialRepository.MMKV_ID)
-      mmkv.clearAll()
+      credentialRepository.clearCredentials(context)
     }
 
     AsyncFunction("configureIntentActions") { getPasskeyAction: String, createPasskeyAction: String ->
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
       if (context != null) {
-        MMKV.initialize(context)
+        credentialRepository.configureIntentActions(context, getPasskeyAction, createPasskeyAction)
       }
-      val mmkv = MMKV.mmkvWithID(CredentialRepository.MMKV_ID)
-      mmkv.encode(CredentialRepository.GET_PASSKEY_ACTION_KEY, getPasskeyAction)
-      mmkv.encode(CredentialRepository.CREATE_PASSKEY_ACTION_KEY, createPasskeyAction)
-    }
-
-    // Defines a JavaScript function that always returns a Promise and whose native code
-    // is by default dispatched on the different thread than the JavaScript runtime runs on.
-    AsyncFunction("setValueAsync") { value: String ->
-      // Send an event to JavaScript.
-      sendEvent("onChange", mapOf(
-        "value" to value
-      ))
     }
   }
 }

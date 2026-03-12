@@ -50,11 +50,6 @@ This has been the commination of many different efforts and ideas. We would like
 - [Will Beaumont](https://github.com/mjbeau) for working though integration within the Pera wallet
 - [Michael T Chuang](https://github.com/michaeltchuang) for his work in KMP integrations and client libraries.
 
-## ❤️ Community
-
-[![stargazers](https://reporoster.com/stars/dark/algorandfoundation/liquid-auth-js)](https://github.com/algorandfoundation/liquid-auth-js/stargazers)
-[![forks](https://reporoster.com/forks/dark/algorandfoundation/liquid-auth-js)](https://github.com/algorandfoundation/liquid-auth-js/network/members)
-
 # 📄 License
 
 This project is licensed under the Apache-2.0 License - see the [LICENSE](./LICENSE) file for details.

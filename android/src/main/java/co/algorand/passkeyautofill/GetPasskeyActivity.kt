@@ -21,6 +21,7 @@ import androidx.credentials.webauthn.PublicKeyCredentialRequestOptions
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import java.security.KeyPair
+import java.security.MessageDigest
 import android.util.Base64 as AndroidBase64
 import org.json.JSONObject
 
@@ -39,10 +40,10 @@ class GetPasskeyActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         request = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         val credentialData = intent.getBundleExtra("CREDENTIAL_DATA")
-        
+
         if (request != null && credentialData != null) {
             origin = credentialRepository.getOrigin(request!!.callingAppInfo)
             credentialIdEnc = credentialData.getString("credentialId")
@@ -54,7 +55,7 @@ class GetPasskeyActivity : AppCompatActivity() {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(50, 50, 50, 50)
         }
-        
+
         val title = TextView(this).apply {
             text = "Use Passkey"
             textSize = 24f
@@ -67,7 +68,7 @@ class GetPasskeyActivity : AppCompatActivity() {
             setPadding(0, 0, 0, 50)
         }
         layout.addView(info)
-        
+
         val confirmButton = Button(this).apply {
             text = "Sign In"
             setOnClickListener {
@@ -85,11 +86,18 @@ class GetPasskeyActivity : AppCompatActivity() {
             val req = request ?: throw IllegalStateException("No request found")
             val option = req.credentialOptions[0] as GetPublicKeyCredentialOption
             val requestOptions = PublicKeyCredentialRequestOptions(option.requestJson)
-            
+
             val credId = AndroidBase64.decode(credentialIdEnc!!, AndroidBase64.DEFAULT)
+
+            val requestJson = JSONObject(option.requestJson)
+            val challenge = requestJson.getString("challenge")
+            val sanitizedOrigin = origin.replace(Regex("/$"), "")
+
             val clientDataHash = option.requestData.getByteArray("androidx.credentials.BUNDLE_KEY_CLIENT_DATA_HASH")
-                ?: throw IllegalStateException("Missing clientDataHash")
-            
+                ?: MessageDigest.getInstance("SHA-256").digest(
+                    "{\"type\":\"webauthn.get\",\"challenge\":\"$challenge\",\"origin\":\"$sanitizedOrigin\",\"crossOrigin\":false}".toByteArray(Charsets.UTF_8)
+                )
+
             val dbCred = credentialRepository.getCredential(this, credId)
                 ?: throw IllegalStateException("Credential not found")
 
@@ -118,10 +126,8 @@ class GetPasskeyActivity : AppCompatActivity() {
             )
 
             // Manual addition of clientDataJSON if needed by some RPs, following reference
-            val requestJson = JSONObject(option.requestJson)
-            val challenge = requestJson.getString("challenge")
             val clientDataJSONb64 = getClientDataJSONb64(origin, challenge)
-            
+
             val delimiter = "response\":{"
             val credentialJson = fidoCredential.json().substringBeforeLast(delimiter) + delimiter +
                     "\"clientDataJSON\":\"$clientDataJSONb64\"," +
@@ -129,12 +135,12 @@ class GetPasskeyActivity : AppCompatActivity() {
 
             val resultIntent = Intent()
             val passkeyCredential = PublicKeyCredential(credentialJson)
-            
+
             PendingIntentHandler.setGetCredentialResponse(
                 resultIntent,
                 GetCredentialResponse(passkeyCredential)
             )
-            
+
             setResult(Activity.RESULT_OK, resultIntent)
         } catch (e: Exception) {
             Log.e(TAG, "Error during passkey assertion", e)

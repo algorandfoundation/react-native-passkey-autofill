@@ -30,7 +30,7 @@
     },
     "plugins": [
       [
-        "react-native-passkey-autofill",
+        "@algorandfoundation/react-native-passkey-autofill",
         {
           "site": "https://fido.shore-tech.net"
         }

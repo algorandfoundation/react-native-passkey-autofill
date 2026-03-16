@@ -19,7 +19,7 @@ To use this module on Android, you need to configure the AutoFill service in you
 ## Usage
 
 ```typescript
-import ReactNativePasskeyAutofill from 'react-native-passkey-autofill';
+import ReactNativePasskeyAutofill from '@algorandfoundation/react-native-passkey-autofill';
 
 // 1. Set the master key for encryption (hex string)
 await ReactNativePasskeyAutofill.setMasterKey(masterKeyHex);

@@ -1,5 +1,5 @@
 import { Store } from "@tanstack/store";
-import ReactNativePasskeyAutofill from 'react-native-passkey-autofill';
+import ReactNativePasskeyAutofill from '@algorandfoundation/react-native-passkey-autofill';
 import {clearKeyData, initializeKeyStore, Key, KeyData, KeyStoreState} from "@algorandfoundation/keystore";
 import {fetchSecret, getMasterKey, storage} from "@algorandfoundation/react-native-keystore";
 import { keyStore } from "./stores/keystore";

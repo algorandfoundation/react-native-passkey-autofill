@@ -1,6 +1,6 @@
 {
-  "name": "react-native-passkey-autofill",
-  "version": "0.1.0",
+  "name": "@algorandfoundation/react-native-passkey-autofill",
+  "version": "1.0.0-canary.1",
   "description": "Passkey AutoFill React Native",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -18,7 +18,7 @@
   "keywords": [
     "react-native",
     "expo",
-    "react-native-passkey-autofill",
+    "@algorandfoundation/react-native-passkey-autofill",
     "ReactNativePasskeyAutofill"
   ],
   "repository": "https://github.com/algorandfoundation/react-native-passkey-autofill",

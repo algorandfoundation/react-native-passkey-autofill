@@ -21,7 +21,7 @@
     "react-native": "0.83.2",
     "react-native-nitro-modules": "0.35.0",
     "react-native-passkey": "^3.3.2",
-    "react-native-passkey-autofill": "..",
+    "@algorandfoundation/react-native-passkey-autofill": "..",
     "react-native-quick-crypto": "^1.0.14"
   },
   "devDependencies": {

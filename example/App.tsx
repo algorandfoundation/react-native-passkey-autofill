@@ -1,4 +1,4 @@
-import ReactNativePasskeyAutofill from 'react-native-passkey-autofill';
+import ReactNativePasskeyAutofill from '@algorandfoundation/react-native-passkey-autofill';
 import { Button, SafeAreaView, ScrollView, Text, View, StyleSheet } from 'react-native';
 import { useEffect, useState } from 'react';
 import { Passkey } from 'react-native-passkey';

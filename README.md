@@ -1,6 +1,12 @@
-# 🔑 react-native-passkey-autofill
+# @algorandfoundation/react-native-passkey-autofill
 
-Passkey AutoFill for React Native using DP256.
+<p align="center">
+  <img src="./example/assets/banner.png" width="100%" />
+</p>
+
+<p align="center">
+  Passkey AutoFill for React Native using DP256.
+</p>
 
 # 🚀 Get Started
 
@@ -9,7 +15,7 @@ For bare React Native projects, you must ensure that you have [installed and con
 ### Add the package to your npm dependencies
 
 ```bash
-npm install react-native-passkey-autofill
+npm install @algorandfoundation/react-native-passkey-autofill
 ```
 
 ### Configure for Android
@@ -25,7 +31,7 @@ If you are using Expo, you can configure the plugin in your `app.json` or `app.c
   "expo": {
     "plugins": [
       [
-        "react-native-passkey-autofill",
+        "@algorandfoundation/react-native-passkey-autofill",
         {
           "site": "https://your-fido-server.com",
           "label": "My Custom Credential Provider"
@@ -60,17 +66,21 @@ await ReactNativePasskeyAutofill.configureIntentActions(
 await ReactNativePasskeyAutofill.clearCredentials();
 ```
 
+## 📱 Example App
+
+The [example](./example) app demonstrates how to integrate this module with a full wallet implementation.
+
 # 🤝 Contributing
 
 Contributions are very welcome! Please refer to guidelines described in the [contributing guide](./CONTRIBUTING.md).
 
 # 💖 Acknowledgements
 
-This has been the commination of many different efforts and ideas. We would like to thank the following individuals and organizations for their contributions:
+This has been the culmination of many different efforts and ideas. We would like to thank the following individuals and organizations for their contributions:
 
 - [Bruno Martins](https://github.com/bmartins) the architect at [Algorand Foundation](https://github.com/algorandfoundation) for conceptualizing and guiding the project.
 - [HashMapsData2Value](https://github.com/HashMapsData2Value) for his guidance and support in DP256 and XHD and his work on the native autofill libraries.
-- [Will Beaumont](https://github.com/mjbeau) for working though integration within the Pera wallet
+- [Will Beaumont](https://github.com/mjbeau) for working through integration within the Pera wallet
 - [Michael T Chuang](https://github.com/michaeltchuang) for his work in KMP integrations and client libraries.
 
 # 📄 License

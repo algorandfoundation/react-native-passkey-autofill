@@ -151,29 +151,6 @@ function AppContent() {
     }
   };
 
-  const handleCreateXHDKey = async () => {
-    try {
-      const seed = new Uint8Array(32).fill(0xAA);
-      const seedId = await key.store.importSeed!(seed, { name: 'Main Seed' });
-
-      const kId = await key.store.generate!({
-        type: 'hd-derived-p256',
-        algorithm: 'P256',
-        extractable: false,
-        keyUsages: ['sign'],
-        params: {
-          parentKeyId: seedId,
-          origin: 'fido.shore-tech.net',
-          userHandle: 'user-123',
-          counter: 0,
-        }
-      });
-      alert('XHD Key created successfully!\nID: ' + kId);
-    } catch (e) {
-      alert('Failed to create XHD key: ' + e);
-    }
-  };
-
   const handleCreateXHDEd25519Key = async () => {
     try {
       const seed = new Uint8Array(32).fill(0xAA);
@@ -229,7 +206,6 @@ function AppContent() {
             {activePasskeyId && <Text style={styles.credText}>Active Passkey: {activePasskeyId}</Text>}
             {xhdEd25519KeyId && <Text style={styles.credText}>Active Ed25519: {xhdEd25519KeyId}</Text>}
             <Button title="Create Passkey" onPress={handleCreatePasskey} />
-            <Button title="Create XHD P256 Key" onPress={handleCreateXHDKey} color="green" />
             <Button title="Create XHD Ed25519 Key" onPress={handleCreateXHDEd25519Key} color="blue" />
           </View>
         </Group>

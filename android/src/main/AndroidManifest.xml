@@ -5,7 +5,7 @@
             android:name=".service.PasskeyAutofillCredentialProviderService"
             android:enabled="true"
             android:exported="true"
-            android:label="My Credential Provider"
+            android:label="@string/passkey_autofill_label"
             android:icon="@mipmap/ic_launcher"
             android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE"
             tools:targetApi="upside_down_cake">

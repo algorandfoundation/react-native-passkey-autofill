@@ -16,6 +16,29 @@ npm install react-native-passkey-autofill
 
 To use this module on Android, you need to configure the AutoFill service in your `AndroidManifest.xml` or via the Expo plugin.
 
+#### Expo Plugin Configuration
+
+If you are using Expo, you can configure the plugin in your `app.json` or `app.config.js`:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      [
+        "react-native-passkey-autofill",
+        {
+          "site": "https://your-fido-server.com",
+          "label": "My Custom Credential Provider"
+        }
+      ]
+    ]
+  }
+}
+```
+
+- `site`: The URL of your FIDO server (default: `https://fido.shore-tech.net`).
+- `label`: The name of the credential provider as it appears in Android settings (default: `My Credential Provider`).
+
 ## Usage
 
 ```typescript

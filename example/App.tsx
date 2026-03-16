@@ -48,10 +48,8 @@ function AppContent() {
   const [activePasskeyId, setActivePasskeyId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (keys.length > 0) {
-      const ed25519 = keys.find(k => k.type === 'hd-derived-ed25519');
-      if (ed25519) setXhdEd25519KeyId(ed25519.id);
-    }
+    const ed25519 = keys.find(k => k.type === 'hd-derived-ed25519' || k.type === 'ed25519');
+    setXhdEd25519KeyId(ed25519 ? ed25519.id : null);
     
     if (passkeys.length > 0 && !activePasskeyId) {
       setActivePasskeyId(passkeys[0].id);
@@ -74,6 +72,61 @@ function AppContent() {
       alert('Passkeys and keys cleared');
     } catch (e) {
       alert('Failed to clear passkeys: ' + e);
+    }
+  };
+
+  const handlePasskeyAction = async () => {
+    if (passkeys.length > 0) {
+      await handleGetPasskey();
+    } else {
+      await handleCreatePasskey();
+    }
+  };
+
+  const handleGetPasskey = async () => {
+    try {
+      const credentialId = activePasskeyId || (passkeys.length > 0 ? passkeys[0].id : null);
+      if (!credentialId) {
+        alert('No passkey selected');
+        return;
+      }
+
+      const urlSafeCredentialId = credentialId.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+      const response = await fetch(`https://fido.shore-tech.net/assertion/request/${urlSafeCredentialId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          "userVerification": "required"
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get assertion request: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const options = await response.json();
+      console.log(options)
+      const result = await Passkey.get(options);
+
+      const submitResponse = await fetch('https://fido.shore-tech.net/assertion/response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result),
+      });
+
+      if (!submitResponse.ok) {
+        const errorText = await submitResponse.text();
+        throw new Error(`Failed to submit assertion response: ${submitResponse.status} ${submitResponse.statusText} - ${errorText}`);
+      }
+
+      const submitResult = await submitResponse.json();
+      if (submitResult.error) throw new Error(submitResult.error);
+
+      alert('Passkey used and verified successfully!');
+    } catch (e) {
+      console.error('Passkey get error:', e);
+      alert('Failed to use passkey: ' + e);
     }
   };
 
@@ -109,6 +162,12 @@ function AppContent() {
           "extensions": { "liquid": true }
         }),
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get attestation request: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
       const options = await response.json();
       
       const result: any = await Passkey.create(options);
@@ -138,6 +197,12 @@ function AppContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(result),
       });
+
+      if (!submitResponse.ok) {
+        const errorText = await submitResponse.text();
+        throw new Error(`Failed to submit attestation response: ${submitResponse.status} ${submitResponse.statusText} - ${errorText}`);
+      }
+
       const submitResult = await submitResponse.json();
       if (submitResult.error) throw new Error(submitResult.error);
 
@@ -205,7 +270,11 @@ function AppContent() {
           <View style={{ gap: 10 }}>
             {activePasskeyId && <Text style={styles.credText}>Active Passkey: {activePasskeyId}</Text>}
             {xhdEd25519KeyId && <Text style={styles.credText}>Active Ed25519: {xhdEd25519KeyId}</Text>}
-            <Button title="Create Passkey" onPress={handleCreatePasskey} />
+            <Button
+              title={passkeys.length > 0 ? "Use Passkey" : "Create Passkey"}
+              onPress={handlePasskeyAction}
+              disabled={!xhdEd25519KeyId}
+            />
             <Button title="Create XHD Ed25519 Key" onPress={handleCreateXHDEd25519Key} color="blue" />
           </View>
         </Group>

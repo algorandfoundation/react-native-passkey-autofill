@@ -6,7 +6,12 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.graphics.Color
+import android.graphics.Typeface
+import android.view.Gravity
 import android.widget.Button
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
@@ -34,8 +39,10 @@ class GetPasskeyActivity : AppCompatActivity() {
     }
 
     private var origin: String = "unknown-origin"
+    private var displayOrigin: String = "unknown-origin"
     private var userHandle: String = "unknown-user"
     private var credentialIdEnc: String? = null
+    private var bundleRequestJson: String? = null
     private var request: ProviderGetCredentialRequest? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,38 +51,146 @@ class GetPasskeyActivity : AppCompatActivity() {
         request = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         val credentialData = intent.getBundleExtra("CREDENTIAL_DATA")
 
-        if (request != null && credentialData != null) {
-            origin = credentialRepository.getOrigin(request!!.callingAppInfo)
+        if (credentialData != null) {
             credentialIdEnc = credentialData.getString("credentialId")
             userHandle = credentialData.getString("userHandle") ?: "unknown-user"
+            bundleRequestJson = credentialData.getString("requestJson")
         }
 
-        // Simple UI
-        val layout = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(50, 50, 50, 50)
+        if (request != null) {
+            origin = credentialRepository.getOrigin(request!!.callingAppInfo)
+            displayOrigin = origin
+            
+            // Try to extract rpId for better display
+            val rawJson = bundleRequestJson ?: (request?.credentialOptions?.get(0) as? GetPublicKeyCredentialOption)?.requestJson
+            if (rawJson != null) {
+                try {
+                    val jsonObj = JSONObject(rawJson)
+                    val pkJson = if (jsonObj.has("publicKey")) jsonObj.getJSONObject("publicKey") else jsonObj
+                    val rpId = pkJson.optString("rpId")
+                    if (rpId.isNotEmpty()) {
+                        displayOrigin = rpId
+                    }
+                } catch (e: Exception) {
+                    // ignore
+                }
+            }
+        }
+
+        // Improved UI
+        val layout = LinearLayout(this).apply {
+            val padding = (32 * resources.displayMetrics.density).toInt()
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, padding)
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(Color.WHITE)
+        }
+
+        // Header with App Icon and Provider Label
+        try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            val appIcon = packageManager.getApplicationIcon(appInfo)
+            val appLabel = packageManager.getApplicationLabel(appInfo)
+
+            val density = resources.displayMetrics.density
+            val iconSize = (48 * density).toInt()
+            val iconMargin = (12 * density).toInt()
+            val headerPadding = (40 * density).toInt()
+
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, headerPadding)
+            }
+
+            val iconView = ImageView(this).apply {
+                setImageDrawable(appIcon)
+                layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                    marginEnd = iconMargin
+                }
+            }
+            header.addView(iconView)
+
+            val providerLabel = TextView(this).apply {
+                text = appLabel
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.DKGRAY)
+            }
+            header.addView(providerLabel)
+            layout.addView(header)
+        } catch (e: Exception) {
+            // Fallback if app info cannot be loaded
         }
 
         val title = TextView(this).apply {
             text = "Use Passkey"
-            textSize = 24f
-            setPadding(0, 0, 0, 50)
+            textSize = 28f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, 0, (8 * resources.displayMetrics.density).toInt())
+            setTextColor(Color.BLACK)
         }
         layout.addView(title)
 
-        val info = TextView(this).apply {
-            text = "User: $userHandle\nAt: $origin"
-            setPadding(0, 0, 0, 50)
+        val description = TextView(this).apply {
+            text = "Sign in to $displayOrigin"
+            textSize = 16f
+            setPadding(0, 0, 0, (40 * resources.displayMetrics.density).toInt())
+            gravity = Gravity.CENTER_HORIZONTAL
+            setTextColor(Color.GRAY)
         }
-        layout.addView(info)
+        layout.addView(description)
+
+        val userInfoContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, (50 * resources.displayMetrics.density).toInt())
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+
+        val userLabel = TextView(this).apply {
+            text = "ACCOUNT"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.GRAY)
+            setPadding(0, 0, 0, (4 * resources.displayMetrics.density).toInt())
+        }
+        userInfoContainer.addView(userLabel)
+
+        val userValue = TextView(this).apply {
+            text = userHandle
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.BLACK)
+        }
+        userInfoContainer.addView(userValue)
+        layout.addView(userInfoContainer)
 
         val confirmButton = Button(this).apply {
             text = "Sign In"
             setOnClickListener {
                 handleAssertion()
             }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, (8 * resources.displayMetrics.density).toInt())
+            }
         }
         layout.addView(confirmButton)
+
+        val cancelButton = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+            text = "Cancel"
+            setOnClickListener {
+                setResult(RESULT_CANCELED)
+                finish()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        layout.addView(cancelButton)
 
         setContentView(layout)
     }
@@ -84,19 +199,47 @@ class GetPasskeyActivity : AppCompatActivity() {
     private fun handleAssertion() {
         try {
             val req = request ?: throw IllegalStateException("No request found")
-            val option = req.credentialOptions[0] as GetPublicKeyCredentialOption
-            val requestOptions = PublicKeyCredentialRequestOptions(option.requestJson)
+            
+            // Prefer using the request JSON from the bundle if available, as it's specifically for this entry
+            val rawRequestJson = bundleRequestJson ?: run {
+                val option = req.credentialOptions[0] as GetPublicKeyCredentialOption
+                option.requestJson
+            }
+            
+            val requestJson = JSONObject(rawRequestJson)
+            val passkeyReqJson = if (requestJson.has("publicKey")) {
+                requestJson.getJSONObject("publicKey").toString()
+            } else {
+                rawRequestJson
+            }
+            val requestOptions = try {
+                PublicKeyCredentialRequestOptions(passkeyReqJson)
+            } catch (e: org.json.JSONException) {
+                Log.e(TAG, "Invalid passkey request JSON: $passkeyReqJson")
+                throw e
+            }
 
             val credId = AndroidBase64.decode(credentialIdEnc!!, AndroidBase64.DEFAULT)
 
-            val requestJson = JSONObject(option.requestJson)
-            val challenge = requestJson.getString("challenge")
+            val passkeyRequestJsonObj = JSONObject(passkeyReqJson)
+            val challenge = if (passkeyRequestJsonObj.has("challenge")) {
+                passkeyRequestJsonObj.getString("challenge")
+            } else {
+                throw org.json.JSONException("No value for challenge in requestJson: $passkeyReqJson")
+            }
             val sanitizedOrigin = origin.replace(Regex("/$"), "")
 
-            val clientDataHash = option.requestData.getByteArray("androidx.credentials.BUNDLE_KEY_CLIENT_DATA_HASH")
-                ?: MessageDigest.getInstance("SHA-256").digest(
-                    "{\"type\":\"webauthn.get\",\"challenge\":\"$challenge\",\"origin\":\"$sanitizedOrigin\",\"crossOrigin\":false}".toByteArray(Charsets.UTF_8)
-                )
+            val clientDataJSON = JSONObject()
+            clientDataJSON.put("type", "webauthn.get")
+            clientDataJSON.put("challenge", challenge)
+            clientDataJSON.put("origin", sanitizedOrigin)
+            clientDataJSON.put("crossOrigin", false)
+            if (sanitizedOrigin.startsWith("android:apk-key-hash:")) {
+                clientDataJSON.put("androidPackageName", req.callingAppInfo.packageName)
+            }
+
+            val clientDataJSONString = clientDataJSON.toString()
+            val clientDataHash = MessageDigest.getInstance("SHA-256").digest(clientDataJSONString.toByteArray(Charsets.UTF_8))
 
             val dbCred = credentialRepository.getCredential(this, credId)
                 ?: throw IllegalStateException("Credential not found")
@@ -104,7 +247,7 @@ class GetPasskeyActivity : AppCompatActivity() {
             val response = AuthenticatorAssertionResponse(
                 requestOptions = requestOptions,
                 credentialId = credId,
-                origin = credentialRepository.getOrigin(req.callingAppInfo),
+                origin = sanitizedOrigin,
                 up = true,
                 uv = true,
                 be = true,
@@ -125,13 +268,23 @@ class GetPasskeyActivity : AppCompatActivity() {
                 authenticatorAttachment = "platform"
             )
 
-            // Manual addition of clientDataJSON if needed by some RPs, following reference
-            val clientDataJSONb64 = getClientDataJSONb64(origin, challenge)
+            // Manual addition of clientDataJSON and signature to the response JSON
+            val clientDataJSONb64 = AndroidBase64.encodeToString(clientDataJSONString.toByteArray(), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING)
+            val signatureb64 = AndroidBase64.encodeToString(response.signature, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING)
 
-            val delimiter = "response\":{"
-            val credentialJson = fidoCredential.json().substringBeforeLast(delimiter) + delimiter +
-                    "\"clientDataJSON\":\"$clientDataJSONb64\"," +
-                    fidoCredential.json().substringAfterLast(delimiter)
+            val fullJson = JSONObject(fidoCredential.json())
+            val respJson = fullJson.getJSONObject("response")
+            respJson.put("clientDataJSON", clientDataJSONb64)
+            respJson.put("signature", signatureb64)
+
+            // Add clientExtensionResults as seen in the example
+            val clientExtensionResults = JSONObject()
+            val credProps = JSONObject()
+            credProps.put("rk", true)
+            clientExtensionResults.put("credProps", credProps)
+            fullJson.put("clientExtensionResults", clientExtensionResults)
+
+            val credentialJson = fullJson.toString()
 
             val resultIntent = Intent()
             val passkeyCredential = PublicKeyCredential(credentialJson)
@@ -149,9 +302,4 @@ class GetPasskeyActivity : AppCompatActivity() {
         finish()
     }
 
-    private fun getClientDataJSONb64(origin: String, challenge: String): String {
-        val sanitizedOrigin = origin.replace(Regex("/$"), "")
-        val jsonString = "{\"type\":\"webauthn.get\",\"challenge\":\"$challenge\",\"origin\":\"$sanitizedOrigin\",\"crossOrigin\":false}"
-        return AndroidBase64.encodeToString(jsonString.toByteArray(), AndroidBase64.NO_WRAP)
-    }
 }

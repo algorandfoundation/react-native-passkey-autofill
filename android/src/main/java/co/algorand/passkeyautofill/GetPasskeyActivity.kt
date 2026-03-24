@@ -229,17 +229,31 @@ class GetPasskeyActivity : AppCompatActivity() {
             }
             val sanitizedOrigin = origin.replace(Regex("/$"), "")
 
-            val clientDataJSON = JSONObject()
-            clientDataJSON.put("type", "webauthn.get")
-            clientDataJSON.put("challenge", challenge)
-            clientDataJSON.put("origin", sanitizedOrigin)
-            clientDataJSON.put("crossOrigin", false)
-            if (sanitizedOrigin.startsWith("android:apk-key-hash:")) {
-                clientDataJSON.put("androidPackageName", req.callingAppInfo.packageName)
+            // Look for system-provided clientDataHash (e.g. from Chrome)
+            val systemClientDataHash = run {
+                val option = req.credentialOptions.find { opt ->
+                    opt is GetPublicKeyCredentialOption && (opt.requestJson == rawRequestJson || 
+                        try { JSONObject(opt.requestJson).toString() == JSONObject(rawRequestJson!!).toString() } catch(e: Exception) { false })
+                } as? GetPublicKeyCredentialOption
+                option?.requestData?.getByteArray("androidx.credentials.BUNDLE_KEY_CLIENT_DATA_HASH")
             }
 
-            val clientDataJSONString = clientDataJSON.toString()
-            val clientDataHash = MessageDigest.getInstance("SHA-256").digest(clientDataJSONString.toByteArray(Charsets.UTF_8))
+            val clientDataJSONString = if (sanitizedOrigin.startsWith("https://") || sanitizedOrigin.startsWith("http://")) {
+                // Compact JSON for web origins to match browser hashing (no spaces, specific order)
+                "{\"type\":\"webauthn.get\",\"challenge\":\"$challenge\",\"origin\":\"$sanitizedOrigin\",\"crossOrigin\":false}"
+            } else {
+                val json = JSONObject()
+                json.put("type", "webauthn.get")
+                json.put("challenge", challenge)
+                json.put("origin", sanitizedOrigin)
+                json.put("crossOrigin", false)
+                if (sanitizedOrigin.startsWith("android:apk-key-hash:")) {
+                    json.put("androidPackageName", req.callingAppInfo.packageName)
+                }
+                json.toString()
+            }
+
+            val clientDataHash = systemClientDataHash ?: MessageDigest.getInstance("SHA-256").digest(clientDataJSONString.toByteArray(Charsets.UTF_8))
 
             val dbCred = credentialRepository.getCredential(this, credId)
                 ?: throw IllegalStateException("Credential not found")

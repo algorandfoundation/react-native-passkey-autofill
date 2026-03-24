@@ -28,6 +28,7 @@ import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import com.tencent.mmkv.MMKV
 import kotlinx.coroutines.*
+import org.json.JSONArray
 import org.json.JSONObject
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
@@ -127,7 +128,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
     /**
      * Fake a list of available PublicKeyCredential Entries
      */
-    private fun processGetCredentialRequest(request: BeginGetCredentialRequest): BeginGetCredentialResponse{
+    private fun processGetCredentialRequest(request: BeginGetCredentialRequest): BeginGetCredentialResponse {
         // Ensure we have a master key available. If not, we can't sign anything, so don't show entries.
         if (!credentialRepository.isMasterKeyAvailable(this)) {
             return BeginGetCredentialResponse(emptyList())
@@ -138,41 +139,68 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         }
 
         val action = credentialRepository.getGetPasskeyAction(this) ?: DEFAULT_GET_PASSKEY_ACTION
+        val allEntries = mutableListOf<PublicKeyCredentialEntry>()
 
-        val entries = credentials.mapNotNull { credential ->
+        for (option in request.beginGetCredentialOptions) {
+            if (option !is BeginGetPublicKeyCredentialOption) continue
+
+            val requestJsonStr = option.requestJson
+            var allowCredentials: JSONArray? = null
             try {
-                // Find suitable option for this entry
-                val option = request.beginGetCredentialOptions.find { opt -> 
-                    if (opt !is BeginGetPublicKeyCredentialOption) return@find false
-                    
-                    // In a real app, we'd check if this credential's origin matches the request's origin
-                    // For now, we return all credentials that match the requested type.
-                    true
-                } as? BeginGetPublicKeyCredentialOption
-
-                if (option == null) {
-                    return@mapNotNull null
-                }
-
-                val data = Bundle()
-                data.putString("credentialId", credential.credentialId)
-                data.putString("userHandle", credential.userHandle)
-                data.putString("requestJson", option.requestJson)
-
-                PublicKeyCredentialEntry.Builder(
-                    this@PasskeyAutofillCredentialProviderService,
-                    credential.userHandle,
-                    createNewPendingIntent(action, GET_PASSKEY_INTENT, data),
-                    option
-                )
-                    .setIcon(Icon.createWithResource(this@PasskeyAutofillCredentialProviderService, android.R.drawable.ic_lock_lock))
-                    .build()
+                val json = JSONObject(requestJsonStr)
+                val pk = if (json.has("publicKey")) json.getJSONObject("publicKey") else json
+                allowCredentials = pk.optJSONArray("allowCredentials")
             } catch (e: Exception) {
-                Log.e(TAG, "Error building PublicKeyCredentialEntry", e)
+                Log.e(TAG, "Error parsing requestJson", e)
+            }
+
+            val allowedIds = if (allowCredentials != null && allowCredentials.length() > 0) {
+                val ids = mutableSetOf<String>()
+                for (i in 0 until allowCredentials.length()) {
+                    ids.add(allowCredentials.getJSONObject(i).getString("id"))
+                }
+                ids
+            } else {
                 null
             }
+
+            for (credential in credentials) {
+                if (allowedIds != null) {
+                    val isAllowed = allowedIds.any { allowedId ->
+                        allowedId == credential.credentialId ||
+                        normalizeBase64(allowedId) == normalizeBase64(credential.credentialId)
+                    }
+                    if (!isAllowed) continue
+                }
+
+                try {
+                    val data = Bundle()
+                    data.putString("credentialId", credential.credentialId)
+                    data.putString("userHandle", credential.userHandle)
+                    data.putString("requestJson", option.requestJson)
+
+                    // Use a unique requestCode for each PendingIntent to avoid data being overwritten
+                    val uniqueRequestCode = (credential.credentialId + option.requestJson).hashCode()
+
+                    val entry = PublicKeyCredentialEntry.Builder(
+                        this,
+                        credential.userHandle,
+                        createNewPendingIntent(action, uniqueRequestCode, data),
+                        option
+                    )
+                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_lock_lock))
+                        .build()
+                    allEntries.add(entry)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error building PublicKeyCredentialEntry", e)
+                }
+            }
         }
-        return BeginGetCredentialResponse(entries)
+        return BeginGetCredentialResponse(allEntries)
+    }
+
+    private fun normalizeBase64(s: String): String {
+        return s.replace("-", "+").replace("_", "/").replace("=", "")
     }
     override fun onClearCredentialStateRequest(
         request: ProviderClearCredentialStateRequest,
@@ -186,12 +214,17 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
     private fun createNewPendingIntent(action: String, requestCode: Int, extra: Bundle?): PendingIntent{
         MMKV.initialize(this)
         val intent = Intent(action)
-        // Set component to be explicit to this library's activities
-        val componentName = when(requestCode) {
-            GET_PASSKEY_INTENT -> android.content.ComponentName(packageName, "co.algorand.passkeyautofill.GetPasskeyActivity")
-            CREATE_PASSKEY_INTENT -> android.content.ComponentName(packageName, "co.algorand.passkeyautofill.CreatePasskeyActivity")
+
+        // Determine component based on action instead of requestCode
+        val getAction = credentialRepository.getGetPasskeyAction(this) ?: DEFAULT_GET_PASSKEY_ACTION
+        val createAction = credentialRepository.getCreatePasskeyAction(this) ?: DEFAULT_CREATE_PASSKEY_ACTION
+
+        val componentName = when(action) {
+            getAction -> android.content.ComponentName(packageName, "co.algorand.passkeyautofill.GetPasskeyActivity")
+            createAction -> android.content.ComponentName(packageName, "co.algorand.passkeyautofill.CreatePasskeyActivity")
             else -> null
         }
+
         if (componentName != null) {
             intent.component = componentName
         } else {

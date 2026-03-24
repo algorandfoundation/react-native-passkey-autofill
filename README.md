@@ -1,7 +1,7 @@
 # @algorandfoundation/react-native-passkey-autofill
 
 <p align="center">
-  <img src="./assets/banner.png" width="100%" />
+  <img src="https://raw.githubusercontent.com/algorandfoundation/react-native-passkey-autofill/refs/heads/main/assets/banner.png" width="100%" />
 </p>
 
 <p align="center">

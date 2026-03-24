@@ -5,7 +5,8 @@
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "expo-module build",
@@ -31,7 +32,7 @@
   "bugs": {
     "url": "https://github.com/algorandfoundation/react-native-passkey-autofill/issues"
   },
-  "author": "Algorand Foundation <michael.feher@algorand.foundation> (https://github.com/algorandfoundation)",
+  "author": "Algorand Foundation (https://github.com/algorandfoundation)",
   "license": "Apache-2.0",
   "homepage": "https://github.com/algorandfoundation/react-native-passkey-autofill#readme",
   "dependencies": {

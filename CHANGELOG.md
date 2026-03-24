@@ -1,3 +1,10 @@
+# [1.0.0-canary.6](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.5...v1.0.0-canary.6) (2026-03-24)
+
+
+### Bug Fixes
+
+* include banner for package README ([60a6559](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/60a655932faac6de57daf0f30261f2d03a2c1476))
+
 # [1.0.0-canary.5](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.4...v1.0.0-canary.5) (2026-03-24)
 
 

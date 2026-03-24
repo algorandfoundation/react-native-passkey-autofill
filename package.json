@@ -32,7 +32,7 @@
   "bugs": {
     "url": "https://github.com/algorandfoundation/react-native-passkey-autofill/issues"
   },
-  "author": "Algorand Foundation (https://github.com/algorandfoundation)",
+  "author": "Algorand Foundation",
   "license": "Apache-2.0",
   "homepage": "https://github.com/algorandfoundation/react-native-passkey-autofill#readme",
   "dependencies": {

@@ -1,3 +1,10 @@
+# [1.0.0-canary.7](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.6...v1.0.0-canary.7) (2026-03-24)
+
+
+### Bug Fixes
+
+* update package lock and include in CI/CD ([1d775cd](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/1d775cdde170a6ef400a1ee8a01fce759ddb1f1e))
+
 # [1.0.0-canary.6](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.5...v1.0.0-canary.6) (2026-03-24)
 
 

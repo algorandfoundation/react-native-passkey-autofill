@@ -1,0 +1,13 @@
+# Lefthook configuration
+# Refer to https://github.com/evilmartians/lefthook/blob/master/docs/configuration.md
+
+pre-commit:
+  commands:
+    lint:
+      run: npm run lint
+
+pre-push:
+  parallel: true
+  commands:
+    test:
+      run: npm run test:all

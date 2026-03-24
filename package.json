@@ -28,7 +28,10 @@
     "@algorandfoundation/react-native-passkey-autofill",
     "ReactNativePasskeyAutofill"
   ],
-  "repository": "https://github.com/algorandfoundation/react-native-passkey-autofill",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/algorandfoundation/react-native-passkey-autofill.git"
+  },
   "bugs": {
     "url": "https://github.com/algorandfoundation/react-native-passkey-autofill/issues"
   },

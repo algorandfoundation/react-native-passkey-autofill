@@ -18,8 +18,8 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
-      - run: chmod +x example/android/gradlew
       - run: npm ci
+      - run: cd example && npx expo prebuild && npm ci
       - run: npm run lint
       - run: npm run build
       - run: npm test

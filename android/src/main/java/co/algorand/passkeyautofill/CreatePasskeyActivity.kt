@@ -266,25 +266,34 @@ class CreatePasskeyActivity : AppCompatActivity() {
             )
 
             val resultIntent = Intent()
-            val responseJson = JSONObject(fidoCredential.json())
-            val passkeyDetails = JSONObject()
-            
-            val ecPubKey = keyPair.public as java.security.interfaces.ECPublicKey
-            val ecPrivKey = keyPair.private as java.security.interfaces.ECPrivateKey
-            
-            fun to32(bi: java.math.BigInteger): ByteArray {
-                var ba = bi.toByteArray()
-                if (ba.size < 32) {
-                    ba = ByteArray(32 - ba.size) + ba
-                }
-                return ba.copyOfRange(ba.size - 32, ba.size)
-            }
-            
-            val x = to32(ecPubKey.w.affineX)
-            val y = to32(ecPubKey.w.affineY)
-            val s = to32(ecPrivKey.s)
+            val fullJson = JSONObject(fidoCredential.json())
+            val respJson = fullJson.getJSONObject("response")
 
-            val createResponse = CreatePublicKeyCredentialResponse(responseJson.toString())
+            // Ensure compact clientDataJSON for registration too
+            val sanitizedOrigin = credentialRepository.getOrigin(req.callingAppInfo).replace(Regex("/$"), "")
+            val challenge = if (requestJson.has("publicKey")) {
+                requestJson.getJSONObject("publicKey").getString("challenge")
+            } else {
+                requestJson.getString("challenge")
+            }
+
+            val clientDataJSONString = if (sanitizedOrigin.startsWith("https://") || sanitizedOrigin.startsWith("http://")) {
+                "{\"type\":\"webauthn.create\",\"challenge\":\"$challenge\",\"origin\":\"$sanitizedOrigin\",\"crossOrigin\":false}"
+            } else {
+                val json = JSONObject()
+                json.put("type", "webauthn.create")
+                json.put("challenge", challenge)
+                json.put("origin", sanitizedOrigin)
+                json.put("crossOrigin", false)
+                if (sanitizedOrigin.startsWith("android:apk-key-hash:")) {
+                    json.put("androidPackageName", req.callingAppInfo.packageName)
+                }
+                json.toString()
+            }
+            val clientDataJSONb64 = AndroidBase64.encodeToString(clientDataJSONString.toByteArray(), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING)
+            respJson.put("clientDataJSON", clientDataJSONb64)
+
+            val createResponse = CreatePublicKeyCredentialResponse(fullJson.toString())
             
             PendingIntentHandler.setCreateCredentialResponse(
                 resultIntent,

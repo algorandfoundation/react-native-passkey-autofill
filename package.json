@@ -11,7 +11,10 @@
     "build": "expo-module build",
     "clean": "expo-module clean",
     "lint": "expo-module lint",
-    "test": "expo-module test",
+    "test": "CI=true expo-module test",
+    "test:android": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:testDebugUnitTest --no-daemon",
+    "test:android:instrumented": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:connectedDebugAndroidTest --no-daemon",
+    "test:all": "npm run test && npm run test:android",
     "prepare": "expo-module prepare",
     "prepublishOnly": "expo-module prepublishOnly",
     "expo-module": "expo-module",
@@ -34,12 +37,24 @@
   "dependencies": {
     "@algorandfoundation/react-native-keystore": "^1.0.0-canary.6"
   },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/src/**/__tests__/**/*.test.ts"
+    ]
+  },
   "devDependencies": {
     "@expo/config-plugins": "^9.0.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^12.0.6",
+    "@semantic-release/npm": "^13.1.5",
     "@types/react": "~19.1.1",
     "expo": "^55.0.1",
     "expo-module-scripts": "^55.0.2",
-    "react-native": "0.82.1"
+    "react-native": "0.82.1",
+    "semantic-release": "^25.0.3"
   },
   "peerDependencies": {
     "expo": "*",

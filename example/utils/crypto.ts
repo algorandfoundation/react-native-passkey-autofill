@@ -10,7 +10,7 @@ export function encodeAddress(publicKey: Uint8Array): string {
 }
 
 export function toBase64URL(arr: Uint8Array | ArrayBuffer): string {
-  const buf = arr instanceof ArrayBuffer ? Buffer.from(arr) : Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength);
+  const buf = arr instanceof ArrayBuffer ? Buffer.from(arr) : Buffer.from(arr.buffer as ArrayBuffer, arr.byteOffset, arr.byteLength);
   const base64 = buf.toString('base64');
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }

@@ -50,6 +50,16 @@ The project includes an example app in the `example/` directory. You can use it 
 
 For more details on how the project is structured, see the [Architecture Guide](./ARCHITECTURE.md).
 
+### Testing
+
+Before submitting a Pull Request, ensure that both JavaScript and Native tests pass:
+
+```bash
+npm run test:all
+```
+
+For more details on the testing strategy, refer to the [Testing section in README.md](./README.md#🧪-testing).
+
 ## Submitting a Pull Request
 
 1. Create a new branch for your feature or bugfix:

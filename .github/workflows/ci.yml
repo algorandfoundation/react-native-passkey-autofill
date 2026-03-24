@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main, release ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - run: npm ci
+      - run: cd example && npm install && npx expo prebuild
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:android
+

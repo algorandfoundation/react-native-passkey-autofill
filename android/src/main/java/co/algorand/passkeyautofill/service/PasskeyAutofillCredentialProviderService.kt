@@ -26,6 +26,7 @@ import androidx.credentials.provider.ProviderClearCredentialStateRequest
 import androidx.credentials.provider.PublicKeyCredentialEntry
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
+import co.algorand.passkeyautofill.utils.PasskeyUtils
 import com.tencent.mmkv.MMKV
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -168,7 +169,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                 if (allowedIds != null) {
                     val isAllowed = allowedIds.any { allowedId ->
                         allowedId == credential.credentialId ||
-                        normalizeBase64(allowedId) == normalizeBase64(credential.credentialId)
+                        PasskeyUtils.normalizeBase64(allowedId) == PasskeyUtils.normalizeBase64(credential.credentialId)
                     }
                     if (!isAllowed) continue
                 }
@@ -199,9 +200,6 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         return BeginGetCredentialResponse(allEntries)
     }
 
-    private fun normalizeBase64(s: String): String {
-        return s.replace("-", "+").replace("_", "/").replace("=", "")
-    }
     override fun onClearCredentialStateRequest(
         request: ProviderClearCredentialStateRequest,
         cancellationSignal: CancellationSignal,

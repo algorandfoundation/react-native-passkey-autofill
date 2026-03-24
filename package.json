@@ -5,14 +5,18 @@
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "expo-module build",
     "clean": "expo-module clean",
-    "lint": "expo-module lint",
-    "test": "expo-module test",
-    "prepare": "expo-module prepare",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false expo-module lint",
+    "test": "CI=true expo-module test",
+    "test:android": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:testDebugUnitTest --no-daemon",
+    "test:android:instrumented": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:connectedDebugAndroidTest --no-daemon",
+    "test:all": "npm run test && npm run test:android",
+    "prepare": "expo-module prepare && npx lefthook install",
     "prepublishOnly": "expo-module prepublishOnly",
     "expo-module": "expo-module",
     "open:ios": "xed example/ios",
@@ -28,18 +32,31 @@
   "bugs": {
     "url": "https://github.com/algorandfoundation/react-native-passkey-autofill/issues"
   },
-  "author": "Algorand Foundation <michael.feher@algorand.foundation> (https://github.com/algorandfoundation)",
+  "author": "Algorand Foundation (https://github.com/algorandfoundation)",
   "license": "Apache-2.0",
   "homepage": "https://github.com/algorandfoundation/react-native-passkey-autofill#readme",
   "dependencies": {
     "@algorandfoundation/react-native-keystore": "^1.0.0-canary.6"
   },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/src/**/__tests__/**/*.test.ts"
+    ]
+  },
   "devDependencies": {
     "@expo/config-plugins": "^9.0.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^12.0.6",
+    "@semantic-release/npm": "^13.1.5",
     "@types/react": "~19.1.1",
     "expo": "^55.0.1",
     "expo-module-scripts": "^55.0.2",
-    "react-native": "0.82.1"
+    "lefthook": "^2.1.4",
+    "react-native": "0.82.1",
+    "semantic-release": "^25.0.3"
   },
   "peerDependencies": {
     "expo": "*",

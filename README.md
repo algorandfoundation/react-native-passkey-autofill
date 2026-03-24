@@ -66,6 +66,34 @@ await ReactNativePasskeyAutofill.configureIntentActions(
 await ReactNativePasskeyAutofill.clearCredentials();
 ```
 
+## 🧪 Testing
+
+The project is set up with a comprehensive testing approach covering both JavaScript and Native (Kotlin) sides.
+
+### JavaScript Tests
+Run unit tests for the TypeScript module using Jest:
+```bash
+npm test
+```
+
+### Native Android Tests
+Run unit tests for the Kotlin code using JUnit and Robolectric. These tests are executed via the example app's Gradle wrapper:
+```bash
+npm run test:android
+```
+
+### All Tests
+Run both JS and Native tests:
+```bash
+npm run test:all
+```
+
+### Continuous Integration (CI)
+The project includes a GitHub Actions workflow that automatically runs linting, JS tests, and Native Android tests on every push and pull request to the `main` or `release` branches. You can find the configuration in `.github/workflows/ci.yml`.
+
+### Integration Testing (E2E)
+For full end-to-end testing that covers the bridge between JavaScript and Native, we recommend using [Maestro](https://maestro.mobile.dev/). It provides a clean, YAML-based way to automate UI flows and verify the integration of the Passkey Autofill service with the system UI.
+
 ## 📱 Example App
 
 The [example](./example) app demonstrates how to integrate this module with a full wallet implementation.

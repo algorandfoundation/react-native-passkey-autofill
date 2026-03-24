@@ -10,26 +10,25 @@ public class ReactNativePasskeyAutofillModule: Module {
     // The module will be accessible from `requireNativeModule('ReactNativePasskeyAutofill')` in JavaScript.
     Name("ReactNativePasskeyAutofill")
 
-    // Defines constant property on the module.
-    Constant("PI") {
-      Double.pi
+    AsyncFunction("setMasterKey") { (secret: String) in
+      // TODO: Implement for iOS
     }
 
-    // Defines event names that the module can send to JavaScript.
-    Events("onChange")
-
-    // Defines a JavaScript synchronous function that runs the native code on the JavaScript thread.
-    Function("hello") {
-      return "Hello world! 👋"
+    AsyncFunction("setHdRootKeyId") { (id: String) in
+      // TODO: Implement for iOS
     }
 
-    // Defines a JavaScript function that always returns a Promise and whose native code
-    // is by default dispatched on the different thread than the JavaScript runtime runs on.
-    AsyncFunction("setValueAsync") { (value: String) in
-      // Send an event to JavaScript.
-      self.sendEvent("onChange", [
-        "value": value
-      ])
+    AsyncFunction("getHdRootKeyId") { () -> String? in
+      // TODO: Implement for iOS
+      return nil
+    }
+
+    AsyncFunction("clearCredentials") {
+      // TODO: Implement for iOS
+    }
+
+    AsyncFunction("configureIntentActions") { (getPasskeyAction: String, createPasskeyAction: String) in
+      // TODO: Implement for iOS
     }
 
     // Enables the module to be used as a native view. Definition components that are accepted as part of the

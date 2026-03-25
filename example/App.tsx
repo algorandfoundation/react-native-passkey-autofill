@@ -92,7 +92,7 @@ function AppContent() {
       }
 
       const urlSafeCredentialId = credentialId.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-      const response = await fetch(`https://fido.shore-tech.net/assertion/request/${urlSafeCredentialId}`, {
+      const response = await fetch(`https://debug.liquidauth.com/assertion/request/${urlSafeCredentialId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -109,7 +109,7 @@ function AppContent() {
       console.log(options)
       const result = await Passkey.get(options);
 
-      const submitResponse = await fetch('https://fido.shore-tech.net/assertion/response', {
+      const submitResponse = await fetch('https://debug.liquidauth.com/assertion/response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(result),
@@ -152,7 +152,7 @@ function AppContent() {
 
       await ReactNativePasskeyAutofill.setHdRootKeyId(ed25519Key.metadata.parentKeyId)
 
-      const response = await fetch('https://fido.shore-tech.net/attestation/request', {
+      const response = await fetch('https://debug.liquidauth.com/attestation/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -183,7 +183,7 @@ function AppContent() {
           ...result.clientExtensionResults,
           liquid: {
             requestId: 'example-session-' + Date.now(),
-            origin: 'fido.shore-tech.net',
+            origin: 'debug.liquidauth.com',
             type: 'algorand',
             address: encodeAddress(new Uint8Array(ed25519Key.publicKey)),
             signature: toBase64URL(signature),
@@ -192,7 +192,7 @@ function AppContent() {
         };
       }
 
-      const submitResponse = await fetch('https://fido.shore-tech.net/attestation/response', {
+      const submitResponse = await fetch('https://debug.liquidauth.com/attestation/response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(result),

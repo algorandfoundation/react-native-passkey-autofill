@@ -30,7 +30,7 @@
       [
         "@algorandfoundation/react-native-passkey-autofill",
         {
-          "site": "https://fido.shore-tech.net"
+          "site": "https://debug.liquidauth.com"
         }
       ]
     ]

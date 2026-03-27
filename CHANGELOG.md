@@ -1,3 +1,10 @@
+# [1.0.0-canary.8](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.7...v1.0.0-canary.8) (2026-03-27)
+
+
+### Features
+
+* passkey added and authenticated events ([b9871f4](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/b9871f475a9a633ae98d30a702ef2814ec8ae5e0))
+
 # [1.0.0-canary.7](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.6...v1.0.0-canary.7) (2026-03-24)
 
 

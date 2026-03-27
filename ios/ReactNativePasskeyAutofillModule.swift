@@ -10,6 +10,8 @@ public class ReactNativePasskeyAutofillModule: Module {
     // The module will be accessible from `requireNativeModule('ReactNativePasskeyAutofill')` in JavaScript.
     Name("ReactNativePasskeyAutofill")
 
+    Events("onPasskeyAdded", "onPasskeyAuthenticated")
+
     AsyncFunction("setMasterKey") { (secret: String) in
       // TODO: Implement for iOS
     }

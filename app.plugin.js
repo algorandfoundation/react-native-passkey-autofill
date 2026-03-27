@@ -231,13 +231,13 @@ const withPasskeyAutofill = (config, props = {}) => {
     if (config.modResults.contents.includes("dP256Android-release")) {
       return config;
     }
-    const libsDir = path.join(__dirname, "android/libs");
+    const libsDir = "../../android/libs";
     config.modResults.contents = config.modResults.contents.replace(
       /allprojects\s*{[\s\n]*repositories\s*{/,
       `allprojects {
   repositories {
     flatDir {
-      dirs "${libsDir}"
+      dirs "$rootDir/${libsDir}"
     }`
     );
     return config;

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Passkey } from 'react-native-passkey';
 import { install } from 'react-native-quick-crypto';
 import Hook from "before-after-hook";
+import { useEventListener } from 'expo';
 
 import { ReactNativeProvider, WalletProvider } from './providers/ReactNativeProvider';
 import { useProvider } from './hooks/useProvider';
@@ -46,6 +47,17 @@ function AppContent() {
   const [account, setAccount] = useState<any>(null);
   const [xhdEd25519KeyId, setXhdEd25519KeyId] = useState<string | null>(null);
   const [activePasskeyId, setActivePasskeyId] = useState<string | null>(null);
+
+  useEventListener(ReactNativePasskeyAutofill, 'onPasskeyAdded', (event) => {
+    console.log('onPasskeyAdded', event);
+    alert('Passkey Added: ' + (event.success ? 'Successfully added passkey!' : 'Failed to add passkey.'));
+    bootstrap();
+  });
+
+  useEventListener(ReactNativePasskeyAutofill, 'onPasskeyAuthenticated', (event) => {
+    console.log('onPasskeyAuthenticated', event);
+    alert('Passkey Authenticated: ' + (event.success ? 'Successfully authenticated!' : 'Authentication failed.'));
+  });
 
   useEffect(() => {
     const ed25519 = keys.find(k => k.type === 'hd-derived-ed25519' || k.type === 'ed25519');

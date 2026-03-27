@@ -301,6 +301,9 @@ class CreatePasskeyActivity : AppCompatActivity() {
             )
             
             setResult(Activity.RESULT_OK, resultIntent)
+            ReactNativePasskeyAutofillModule.instance?.sendEvent("onPasskeyAdded", Bundle().apply {
+                putBoolean("success", true)
+            })
         } catch (e: Exception) {
             Log.e(TAG, "Error during passkey creation", e)
             setResult(Activity.RESULT_CANCELED)

@@ -66,6 +66,31 @@ await ReactNativePasskeyAutofill.configureIntentActions(
 await ReactNativePasskeyAutofill.clearCredentials();
 ```
 
+## Events
+
+You can listen for events emitted by the native module when a passkey is successfully added or authenticated.
+
+```typescript
+import ReactNativePasskeyAutofill from '@algorandfoundation/react-native-passkey-autofill';
+import { useEffect } from 'react';
+
+// ... inside a component or hook
+useEffect(() => {
+  const addedSubscription = ReactNativePasskeyAutofill.addListener('onPasskeyAdded', (event) => {
+    console.log('Passkey added successfully:', event.success);
+  });
+
+  const authSubscription = ReactNativePasskeyAutofill.addListener('onPasskeyAuthenticated', (event) => {
+    console.log('Passkey authenticated successfully:', event.success);
+  });
+
+  return () => {
+    addedSubscription.remove();
+    authSubscription.remove();
+  };
+}, []);
+```
+
 ## 🧪 Testing
 
 The project is set up with a comprehensive testing approach covering both JavaScript and Native (Kotlin) sides.

@@ -12,6 +12,10 @@ import java.security.Security
 class ReactNativePasskeyAutofillModule : Module() {
   private val credentialRepository = CredentialRepository()
 
+  companion object {
+    var instance: ReactNativePasskeyAutofillModule? = null
+  }
+
   init {
     Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME)
     Security.addProvider(BouncyCastleProvider())
@@ -25,6 +29,16 @@ class ReactNativePasskeyAutofillModule : Module() {
     // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
     // The module will be accessible from `requireNativeModule('ReactNativeLiquidAuth')` in JavaScript.
     Name("ReactNativePasskeyAutofill")
+
+    OnCreate {
+      instance = this@ReactNativePasskeyAutofillModule
+    }
+
+    OnDestroy {
+      instance = null
+    }
+
+    Events("onPasskeyAdded", "onPasskeyAuthenticated")
 
     AsyncFunction("setMasterKey") { secret: String ->
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context

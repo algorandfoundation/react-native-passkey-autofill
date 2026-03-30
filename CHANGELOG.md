@@ -1,3 +1,10 @@
+# [1.0.0-canary.9](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.8...v1.0.0-canary.9) (2026-03-30)
+
+
+### Bug Fixes
+
+* x logins, refactor example views to be dialogs ([e7a1ccf](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/e7a1ccf91f88b5c369ff3082f06d538fc8b3db89))
+
 # [1.0.0-canary.8](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.7...v1.0.0-canary.8) (2026-03-27)
 
 

@@ -1,3 +1,10 @@
+# [1.0.0-canary.10](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.9...v1.0.0-canary.10) (2026-03-30)
+
+
+### Bug Fixes
+
+* bouncy castle provider insertion order ([9e9039d](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/9e9039deab02f75f5a4397cedc098c0ca2e24875))
+
 # [1.0.0-canary.9](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.8...v1.0.0-canary.9) (2026-03-30)
 
 

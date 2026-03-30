@@ -15,13 +15,19 @@
                 android:name="android.credentials.provider"
                 android:resource="@xml/provider" />
         </service>
-        <activity android:name=".GetPasskeyActivity" android:exported="true">
+        <activity android:name="co.algorand.passkeyautofill.GetPasskeyActivity" 
+            android:exported="true" 
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.PasskeyAutofill.Dialog">
             <intent-filter>
                 <action android:name="co.algorand.passkeyautofill.GET_PASSKEY"/>
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
         </activity>
-        <activity android:name=".CreatePasskeyActivity" android:exported="true">
+        <activity android:name="co.algorand.passkeyautofill.CreatePasskeyActivity" 
+            android:exported="true" 
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.PasskeyAutofill.Dialog">
             <intent-filter>
                 <action android:name="co.algorand.passkeyautofill.CREATE_PASSKEY"/>
                 <category android:name="android.intent.category.DEFAULT"/>

@@ -18,7 +18,7 @@ class ReactNativePasskeyAutofillModule : Module() {
 
   init {
     Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME)
-    Security.addProvider(BouncyCastleProvider())
+    Security.insertProviderAt(BouncyCastleProvider(), 1)
   }
 
   // Each module class must implement the definition function. The definition consists of components

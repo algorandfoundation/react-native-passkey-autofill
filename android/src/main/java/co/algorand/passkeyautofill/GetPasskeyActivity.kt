@@ -193,6 +193,11 @@ class GetPasskeyActivity : AppCompatActivity() {
         layout.addView(cancelButton)
 
         setContentView(layout)
+        
+        // Ensure the activity is focusable and can receive touches
+        layout.isFocusable = true
+        layout.isFocusableInTouchMode = true
+        layout.requestFocus()
     }
 
     @SuppressLint("RestrictedApi")

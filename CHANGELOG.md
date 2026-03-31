@@ -1,3 +1,10 @@
+# [1.0.0-canary.11](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.10...v1.0.0-canary.11) (2026-03-31)
+
+
+### Bug Fixes
+
+* update service url ([ffc2c22](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/ffc2c22e18661cf5a159eef5b06303b94981df6b))
+
 # [1.0.0-canary.10](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.9...v1.0.0-canary.10) (2026-03-30)
 
 

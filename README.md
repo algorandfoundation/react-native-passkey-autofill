@@ -42,7 +42,7 @@ If you are using Expo, you can configure the plugin in your `app.json` or `app.c
 }
 ```
 
-- `site`: The URL of your FIDO server (default: `https://fido.shore-tech.net`).
+- `site`: The URL of your FIDO server (default: `https://debug.liquidauth.com`).
 - `label`: The name of the credential provider as it appears in Android settings (default: `My Credential Provider`).
 
 ## Usage

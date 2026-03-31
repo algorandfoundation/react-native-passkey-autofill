@@ -165,7 +165,7 @@ const withUserAgent = (config) => {
 };
 
 const withPasskeyAutofill = (config, props = {}) => {
-  const site = props.site || "https://fido.shore-tech.net";
+  const site = props.site || "https://debug.liquidauth.com";
   const label = props.label || "My Credential Provider";
 
   config = withAndroidCookieModule(config);

@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [ main, release ]
+    branches: [main, release]
 permissions:
   id-token: write
   contents: write
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
+          cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: cd example && npx expo prebuild

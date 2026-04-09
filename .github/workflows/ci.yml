@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [ main, release ]
+    branches: [main, release]
 
 jobs:
   build:
@@ -13,16 +13,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
+          cache: "pnpm"
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '17'
+          distribution: "zulu"
+          java-version: "17"
       - run: pnpm install --frozen-lockfile
       - run: cd example && npx expo prebuild
       - run: pnpm run lint
       - run: pnpm run build
       - run: pnpm test
       - run: pnpm run test:android
-

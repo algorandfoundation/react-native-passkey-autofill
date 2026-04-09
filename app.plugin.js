@@ -16,11 +16,7 @@ const withAndroidCookieModule = (config) => {
       const projectRoot = config.modRequest.projectRoot;
       const packageId = config.android?.package || "co.algorand.auth.example";
       const packagePath = packageId.replace(/\./g, "/");
-      const targetDir = path.join(
-        projectRoot,
-        "android/app/src/main/java",
-        packagePath
-      );
+      const targetDir = path.join(projectRoot, "android/app/src/main/java", packagePath);
 
       // Ensure the directory exists
       fs.mkdirSync(targetDir, { recursive: true });
@@ -80,14 +76,8 @@ class CookiePackage : ReactPackage {
 }
 `;
 
-      fs.writeFileSync(
-        path.join(targetDir, "CookieModule.kt"),
-        cookieModuleContent
-      );
-      fs.writeFileSync(
-        path.join(targetDir, "CookiePackage.kt"),
-        cookiePackageContent
-      );
+      fs.writeFileSync(path.join(targetDir, "CookieModule.kt"), cookieModuleContent);
+      fs.writeFileSync(path.join(targetDir, "CookiePackage.kt"), cookiePackageContent);
 
       return config;
     },
@@ -112,10 +102,7 @@ const withUserAgent = (config) => {
 
     imports.forEach((imp) => {
       if (!content.includes(imp)) {
-        content = content.replace(
-          /package .*\n/,
-          (match) => `${match}${imp}\n`
-        );
+        content = content.replace(/package .*\n/, (match) => `${match}${imp}\n`);
       }
     });
 
@@ -145,17 +132,14 @@ const withUserAgent = (config) => {
 `;
 
     if (!content.includes("OkHttpClientProvider.setOkHttpClientFactory")) {
-      content = content.replace(
-        /super\.onCreate\(\)/,
-        `super.onCreate()${okHttpClientCode}`
-      );
+      content = content.replace(/super\.onCreate\(\)/, `super.onCreate()${okHttpClientCode}`);
     }
 
     // Register CookiePackage if it exists
     if (!content.includes("add(CookiePackage())")) {
       content = content.replace(
         /PackageList\(this\)\.packages\.apply \{/,
-        `PackageList(this).packages.apply {\n              add(CookiePackage())`
+        `PackageList(this).packages.apply {\n              add(CookiePackage())`,
       );
     }
 
@@ -175,17 +159,13 @@ const withPasskeyAutofill = (config, props = {}) => {
   // 1. Add asset_statements meta-data to MainActivity
   config = withAndroidManifest(config, async (config) => {
     const mainActivity = config.modResults.manifest.application[0].activity.find(
-      (a) => a["$"]["android:name"] === ".MainActivity"
+      (a) => a["$"]["android:name"] === ".MainActivity",
     );
     if (mainActivity) {
       if (!mainActivity["meta-data"]) {
         mainActivity["meta-data"] = [];
       }
-      if (
-        !mainActivity["meta-data"].find(
-          (m) => m["$"]["android:name"] === "asset_statements"
-        )
-      ) {
+      if (!mainActivity["meta-data"].find((m) => m["$"]["android:name"] === "asset_statements")) {
         mainActivity["meta-data"].push({
           $: {
             "android:name": "asset_statements",
@@ -221,7 +201,7 @@ const withPasskeyAutofill = (config, props = {}) => {
           _: label,
         },
       ],
-      config.modResults
+      config.modResults,
     );
     return config;
   });
@@ -238,7 +218,7 @@ const withPasskeyAutofill = (config, props = {}) => {
   repositories {
     flatDir {
       dirs "$rootDir/${libsDir}"
-    }`
+    }`,
     );
     return config;
   });

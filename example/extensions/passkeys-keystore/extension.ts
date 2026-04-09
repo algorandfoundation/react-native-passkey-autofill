@@ -4,16 +4,10 @@ import type {
   KeyStoreState,
   XHDDomainP256KeyData,
 } from "@algorandfoundation/keystore";
-import type {
-  Passkey,
-  PasskeyStoreExtension,
-} from "../passkeys";
+import type { Passkey, PasskeyStoreExtension } from "../passkeys";
 import type { Extension } from "@algorandfoundation/wallet-provider";
 import type { Store } from "@tanstack/store";
-import type {
-  PasskeysKeystoreExtension,
-  PasskeysKeystoreExtensionOptions,
-} from "./types";
+import type { PasskeysKeystoreExtension, PasskeysKeystoreExtensionOptions } from "./types";
 
 export const WithPasskeysKeystore: Extension<PasskeysKeystoreExtension> = (
   provider: KeyStoreExtension & PasskeyStoreExtension,
@@ -51,7 +45,7 @@ export const WithPasskeysKeystore: Extension<PasskeysKeystoreExtension> = (
 
   if (autoPopulate) {
     const keys = [...((provider.keys as Key[]) ?? [])];
-    
+
     const processUpdates = (newKeys: Key[]) => {
       const addedKeys = newKeys.filter(
         (newKey) => !keys.some((existingKey) => existingKey.id === newKey.id),
@@ -81,15 +75,13 @@ export const WithPasskeysKeystore: Extension<PasskeysKeystoreExtension> = (
 
       for (const k of addedKeys) {
         if (k.type === "hd-derived-p256" || k.type === "xhd-derived-p256") {
-          provider.passkey.store.addPasskey(
-            createPasskeyFromKey(k as XHDDomainP256KeyData),
-          );
+          provider.passkey.store.addPasskey(createPasskeyFromKey(k as XHDDomainP256KeyData));
         }
       }
     };
 
     keyStore.subscribe((state) => {
-      if (state.status !== 'ready' && state.status !== 'idle') return;
+      if (state.status !== "ready" && state.status !== "idle") return;
       processUpdates(state.keys as unknown as Key[]);
     });
   }

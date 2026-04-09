@@ -1,11 +1,23 @@
 {
   "name": "@algorandfoundation/react-native-passkey-autofill",
   "version": "1.0.0-canary.11",
-  "packageManager": "pnpm@10.33.0",
-  "engines": {
-    "node": ">=22"
-  },
   "description": "Passkey AutoFill React Native",
+  "keywords": [
+    "@algorandfoundation/react-native-passkey-autofill",
+    "ReactNativePasskeyAutofill",
+    "expo",
+    "react-native"
+  ],
+  "homepage": "https://github.com/algorandfoundation/react-native-passkey-autofill#readme",
+  "bugs": {
+    "url": "https://github.com/algorandfoundation/react-native-passkey-autofill/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Algorand Foundation",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/algorandfoundation/react-native-passkey-autofill.git"
+  },
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "publishConfig": {
@@ -29,31 +41,8 @@
     "open:ios": "xed example/ios",
     "open:android": "open -a \"Android Studio\" example/android"
   },
-  "keywords": [
-    "react-native",
-    "expo",
-    "@algorandfoundation/react-native-passkey-autofill",
-    "ReactNativePasskeyAutofill"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+ssh://git@github.com/algorandfoundation/react-native-passkey-autofill.git"
-  },
-  "bugs": {
-    "url": "https://github.com/algorandfoundation/react-native-passkey-autofill/issues"
-  },
-  "author": "Algorand Foundation",
-  "license": "Apache-2.0",
-  "homepage": "https://github.com/algorandfoundation/react-native-passkey-autofill#readme",
   "dependencies": {
     "@algorandfoundation/react-native-keystore": "^1.0.0-canary.6"
-  },
-  "jest": {
-    "preset": "ts-jest",
-    "testEnvironment": "node",
-    "testMatch": [
-      "<rootDir>/src/**/__tests__/**/*.test.ts"
-    ]
   },
   "devDependencies": {
     "@expo/config-plugins": "^9.0.0",
@@ -74,5 +63,16 @@
     "expo": "*",
     "react": "*",
     "react-native": "*"
-  }
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/src/**/__tests__/**/*.test.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.33.0"
 }

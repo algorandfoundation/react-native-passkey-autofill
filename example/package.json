@@ -1,6 +1,8 @@
 {
   "name": "react-native-passkey-autofill-example",
   "version": "1.0.0",
+  "private": true,
+  "license": "Apache-2.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -38,24 +40,22 @@
     "react-test-renderer": "19.2.4",
     "typescript": "~5.9.2"
   },
-  "private": true,
-  "license": "Apache-2.0",
-  "expo": {
-    "autolinking": {
-      "nativeModulesDir": ".."
-    }
-  },
   "overrides": {
     "@tanstack/store": "^0.9.1"
   },
   "jest": {
-    "preset": "jest-expo",
     "moduleNameMapper": {
-      "^@algorandfoundation/react-native-passkey-autofill$": "<rootDir>/..",
-      "^@algorandfoundation/(.*)$": "<rootDir>/../node_modules/@algorandfoundation/$1"
+      "^@algorandfoundation/(.*)$": "<rootDir>/../node_modules/@algorandfoundation/$1",
+      "^@algorandfoundation/react-native-passkey-autofill$": "<rootDir>/.."
     },
+    "preset": "jest-expo",
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|@noble/.*|@scure/.*|before-after-hook|@algorandfoundation/.*)"
     ]
+  },
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": ".."
+    }
   }
 }

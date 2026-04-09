@@ -1,6 +1,6 @@
-import { NativeModule, requireNativeModule } from 'expo';
+import { NativeModule, requireNativeModule } from "expo";
 
-import { ReactNativePasskeyAutofillModuleEvents } from './ReactNativePasskeyAutofill.types';
+import { ReactNativePasskeyAutofillModuleEvents } from "./ReactNativePasskeyAutofill.types";
 
 declare class ReactNativePasskeyAutofillModule extends NativeModule<ReactNativePasskeyAutofillModuleEvents> {
   setMasterKey(secret: string): Promise<void>;
@@ -11,4 +11,4 @@ declare class ReactNativePasskeyAutofillModule extends NativeModule<ReactNativeP
 }
 
 // This call loads the native module object from the JSI.
-export default requireNativeModule<ReactNativePasskeyAutofillModule>('ReactNativePasskeyAutofill');
+export default requireNativeModule<ReactNativePasskeyAutofillModule>("ReactNativePasskeyAutofill");

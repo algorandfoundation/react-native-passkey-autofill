@@ -25,11 +25,7 @@ export function getPasskey({
   return store.state.passkeys.find((p) => p.id === id);
 }
 
-export function clearPasskeys({
-  store,
-}: {
-  store: Store<PasskeyStoreState>;
-}): void {
+export function clearPasskeys({ store }: { store: Store<PasskeyStoreState> }): void {
   store.setState((state) => ({
     ...state,
     passkeys: [],

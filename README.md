@@ -12,10 +12,10 @@
 
 For bare React Native projects, you must ensure that you have [installed and configured the `expo` package](https://docs.expo.dev/bare/installing-expo-modules/) before continuing.
 
-### Add the package to your npm dependencies
+### Add the package to your dependencies
 
 ```bash
-npm install @algorandfoundation/react-native-passkey-autofill
+pnpm add @algorandfoundation/react-native-passkey-autofill
 ```
 
 ### Configure for Android
@@ -48,7 +48,7 @@ If you are using Expo, you can configure the plugin in your `app.json` or `app.c
 ## Usage
 
 ```typescript
-import ReactNativePasskeyAutofill from '@algorandfoundation/react-native-passkey-autofill';
+import ReactNativePasskeyAutofill from "@algorandfoundation/react-native-passkey-autofill";
 
 // 1. Set the master key for encryption (hex string)
 await ReactNativePasskeyAutofill.setMasterKey(masterKeyHex);
@@ -58,8 +58,8 @@ await ReactNativePasskeyAutofill.setHdRootKeyId(hdRootKeyId);
 
 // 3. Configure intent actions for the Passkey flows
 await ReactNativePasskeyAutofill.configureIntentActions(
-  'your.package.name.GET_PASSKEY',
-  'your.package.name.CREATE_PASSKEY'
+  "your.package.name.GET_PASSKEY",
+  "your.package.name.CREATE_PASSKEY",
 );
 
 // Optional: Clear credentials
@@ -71,18 +71,21 @@ await ReactNativePasskeyAutofill.clearCredentials();
 You can listen for events emitted by the native module when a passkey is successfully added or authenticated.
 
 ```typescript
-import ReactNativePasskeyAutofill from '@algorandfoundation/react-native-passkey-autofill';
-import { useEffect } from 'react';
+import ReactNativePasskeyAutofill from "@algorandfoundation/react-native-passkey-autofill";
+import { useEffect } from "react";
 
 // ... inside a component or hook
 useEffect(() => {
-  const addedSubscription = ReactNativePasskeyAutofill.addListener('onPasskeyAdded', (event) => {
-    console.log('Passkey added successfully:', event.success);
+  const addedSubscription = ReactNativePasskeyAutofill.addListener("onPasskeyAdded", (event) => {
+    console.log("Passkey added successfully:", event.success);
   });
 
-  const authSubscription = ReactNativePasskeyAutofill.addListener('onPasskeyAuthenticated', (event) => {
-    console.log('Passkey authenticated successfully:', event.success);
-  });
+  const authSubscription = ReactNativePasskeyAutofill.addListener(
+    "onPasskeyAuthenticated",
+    (event) => {
+      console.log("Passkey authenticated successfully:", event.success);
+    },
+  );
 
   return () => {
     addedSubscription.remove();
@@ -96,27 +99,35 @@ useEffect(() => {
 The project is set up with a comprehensive testing approach covering both JavaScript and Native (Kotlin) sides.
 
 ### JavaScript Tests
+
 Run unit tests for the TypeScript module using Jest:
+
 ```bash
-npm test
+pnpm test
 ```
 
 ### Native Android Tests
+
 Run unit tests for the Kotlin code using JUnit and Robolectric. These tests are executed via the example app's Gradle wrapper:
+
 ```bash
-npm run test:android
+pnpm run test:android
 ```
 
 ### All Tests
+
 Run both JS and Native tests:
+
 ```bash
-npm run test:all
+pnpm run test:all
 ```
 
 ### Continuous Integration (CI)
+
 The project includes a GitHub Actions workflow that automatically runs linting, JS tests, and Native Android tests on every push and pull request to the `main` or `release` branches. You can find the configuration in `.github/workflows/ci.yml`.
 
 ### Integration Testing (E2E)
+
 For full end-to-end testing that covers the bridge between JavaScript and Native, we recommend using [Maestro](https://maestro.mobile.dev/). It provides a clean, YAML-based way to automate UI flows and verify the integration of the Passkey Autofill service with the system UI.
 
 ## 📱 Example App

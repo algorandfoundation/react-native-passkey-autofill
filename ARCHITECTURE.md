@@ -35,9 +35,11 @@ The Android part is implemented using Kotlin and follows the Android Autofill Fr
 The `PasskeyAutofillCredentialProviderService` is the core of the Android implementation. It extends the Android Jetpack `CredentialProviderService` to provide passkeys directly to the system's Credential Manager.
 
 ##### What is `CredentialProviderService`?
+
 Introduced in Android 14 (API level 34) and backported to Android 9 via the Jetpack Credentials library, this service allows password managers and other credential providers to integrate with the system's unified sign-in flow. When a user interacts with a sign-in or sign-up field, the system queries registered services to provide available credentials.
 
 ##### Handling the Chain of Trust
+
 The "Chain of Trust" ensures that passkeys are only used by the legitimate owners of a domain or application. This is handled through several layers of validation:
 
 1.  **Digital Asset Links**: For a passkey to be used across a website and an Android app, the website must host a `/.well-known/assetlinks.json` file that explicitly authorizes the Android app (via its package name and certificate fingerprint). This establishes a cryptographically verified link between the web origin and the mobile application.

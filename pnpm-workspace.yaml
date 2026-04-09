@@ -1,0 +1,12 @@
+packages:
+  - "."
+  - "example"
+minimumReleaseAgeExclude:
+  - webpack
+  - react
+  - "react-dom"
+  - "@expo/dom-webview"
+  - "@types/node"
+  - "@algorandfoundation/wallet-provider"
+  - "@typescript-eslint/types"
+  - "@typescript-eslint/visitor-keys"

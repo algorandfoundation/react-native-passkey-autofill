@@ -1,6 +1,10 @@
 {
   "name": "@algorandfoundation/react-native-passkey-autofill",
   "version": "1.0.0-canary.11",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
   "description": "Passkey AutoFill React Native",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -15,7 +19,7 @@
     "test": "CI=true expo-module test",
     "test:android": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:testDebugUnitTest --no-daemon",
     "test:android:instrumented": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:connectedDebugAndroidTest --no-daemon",
-    "test:all": "npm run test && npm run test:android",
+    "test:all": "pnpm run test && pnpm run test:android",
     "prepare": "expo-module prepare",
     "prepublishOnly": "expo-module prepublishOnly",
     "expo-module": "expo-module",
@@ -57,7 +61,7 @@
     "@types/react": "~19.1.1",
     "expo": "^55.0.1",
     "expo-module-scripts": "^55.0.2",
-    "lefthook": "^2.1.4",
+    "lefthook": "2.1.4",
     "react-native": "0.82.1",
     "semantic-release": "^25.0.3"
   },

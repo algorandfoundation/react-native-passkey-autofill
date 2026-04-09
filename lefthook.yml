@@ -4,10 +4,9 @@
 pre-commit:
   commands:
     lint:
-      run: npm run lint
-
+      run: pnpm run lint
 pre-push:
   parallel: true
   commands:
     test:
-      run: npm run test:all
+      run: pnpm run test:all

@@ -10,11 +10,11 @@ To get started with the project, follow these steps:
 2. **Clone the repository** to your local machine.
 3. **Install dependencies** at the root of the project:
    ```bash
-   npm install
+   pnpm install
    ```
 4. **Build the project**:
    ```bash
-   npm run build
+   pnpm run build
    ```
 
 ## Development Workflow
@@ -29,7 +29,7 @@ The project includes an example app in the `example/` directory. You can use it 
    ```
 2. Install example dependencies:
    ```bash
-   npm install
+   pnpm install
    ```
 3. Prebuild the example for Android or iOS:
    ```bash
@@ -37,9 +37,9 @@ The project includes an example app in the `example/` directory. You can use it 
    ```
 4. Run the example app:
    ```bash
-   npm run android # for Android
+   pnpm run android # for Android
    # or
-   npm run ios # for iOS
+   pnpm run ios # for iOS
    ```
 
 ### Code Style
@@ -55,7 +55,7 @@ For more details on how the project is structured, see the [Architecture Guide](
 Before submitting a Pull Request, ensure that both JavaScript and Native tests pass:
 
 ```bash
-npm run test:all
+pnpm run test:all
 ```
 
 For more details on the testing strategy, refer to the [Testing section in README.md](./README.md#🧪-testing).

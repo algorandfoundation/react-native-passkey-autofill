@@ -12,10 +12,10 @@
 
 For bare React Native projects, you must ensure that you have [installed and configured the `expo` package](https://docs.expo.dev/bare/installing-expo-modules/) before continuing.
 
-### Add the package to your npm dependencies
+### Add the package to your dependencies
 
 ```bash
-npm install @algorandfoundation/react-native-passkey-autofill
+pnpm add @algorandfoundation/react-native-passkey-autofill
 ```
 
 ### Configure for Android
@@ -98,19 +98,19 @@ The project is set up with a comprehensive testing approach covering both JavaSc
 ### JavaScript Tests
 Run unit tests for the TypeScript module using Jest:
 ```bash
-npm test
+pnpm test
 ```
 
 ### Native Android Tests
 Run unit tests for the Kotlin code using JUnit and Robolectric. These tests are executed via the example app's Gradle wrapper:
 ```bash
-npm run test:android
+pnpm run test:android
 ```
 
 ### All Tests
 Run both JS and Native tests:
 ```bash
-npm run test:all
+pnpm run test:all
 ```
 
 ### Continuous Integration (CI)

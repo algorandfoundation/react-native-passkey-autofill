@@ -9,19 +9,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
+          cache: 'pnpm'
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-      - run: npm ci
-      - run: cd example && npm install && npx expo prebuild
-      - run: npm run lint
-      - run: npm run build
-      - run: npm test
-      - run: npm run test:android
+      - run: pnpm install --frozen-lockfile
+      - run: cd example && npx expo prebuild
+      - run: pnpm run lint
+      - run: pnpm run build
+      - run: pnpm test
+      - run: pnpm run test:android
 

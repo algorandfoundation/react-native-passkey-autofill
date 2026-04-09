@@ -1,0 +1,10 @@
+packages:
+  - "."
+  - "example"
+minimumReleaseAgeExclude:
+  - webpack
+  - react
+  - "react-dom"
+  - "@expo/dom-webview"
+  - "@types/node"
+  - "@algorandfoundation/wallet-provider"

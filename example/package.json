@@ -12,17 +12,19 @@
   "dependencies": {
     "@algorandfoundation/keystore": "^1.0.0-canary.12",
     "@algorandfoundation/react-native-keystore": "^1.0.0-canary.6",
+    "@algorandfoundation/react-native-passkey-autofill": "workspace:*",
+    "@algorandfoundation/wallet-provider": "^1.0.0-canary.5",
     "@noble/hashes": "^2.0.1",
     "@scure/base": "^2.0.0",
     "@tanstack/react-store": "^0.9.1",
-    "@tanstack/store": "^0.9.1",
+    "@tanstack/store": "^0.9.3",
+    "before-after-hook": "^4.0.0",
     "buffer": "^6.0.3",
     "expo": "~55.0.2",
     "react": "^19.2.0",
     "react-native": "0.83.2",
     "react-native-nitro-modules": "0.35.0",
     "react-native-passkey": "^3.3.2",
-    "@algorandfoundation/react-native-passkey-autofill": "..",
     "react-native-quick-crypto": "^1.0.14"
   },
   "devDependencies": {

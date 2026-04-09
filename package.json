@@ -35,7 +35,6 @@
     "test:android": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:testDebugUnitTest --no-daemon",
     "test:android:instrumented": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:connectedDebugAndroidTest --no-daemon",
     "test:all": "pnpm run test && pnpm run test:android",
-    "prepare": "expo-module prepare",
     "prepublishOnly": "expo-module prepublishOnly",
     "expo-module": "expo-module",
     "open:ios": "xed example/ios",

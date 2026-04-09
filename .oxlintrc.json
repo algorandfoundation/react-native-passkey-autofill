@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "eslint",
+    "react",
+    "react-perf",
+    "typescript",
+    "unicorn",
+    "oxc"
+  ],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "react-hooks/exhaustive-deps": "warn",
+    "eslint/no-unused-vars": "warn"
+  },
+  "env": {
+    "builtin": true
+  }
+}

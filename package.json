@@ -15,7 +15,10 @@
   "scripts": {
     "build": "expo-module build",
     "clean": "expo-module clean",
-    "lint": "ESLINT_USE_FLAT_CONFIG=false expo-module lint",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "test": "CI=true expo-module test",
     "test:android": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:testDebugUnitTest --no-daemon",
     "test:android:instrumented": "cd example/android && ./gradlew :algorandfoundation-react-native-passkey-autofill:connectedDebugAndroidTest --no-daemon",
@@ -62,6 +65,8 @@
     "expo": "^55.0.1",
     "expo-module-scripts": "^55.0.2",
     "lefthook": "2.1.4",
+    "oxfmt": "^0.43.0",
+    "oxlint": "^1.58.0",
     "react-native": "0.82.1",
     "semantic-release": "^25.0.3"
   },

@@ -8,3 +8,5 @@ minimumReleaseAgeExclude:
   - "@expo/dom-webview"
   - "@types/node"
   - "@algorandfoundation/wallet-provider"
+  - "@typescript-eslint/types"
+  - "@typescript-eslint/visitor-keys"

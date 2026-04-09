@@ -24,10 +24,15 @@ import androidx.credentials.provider.CreateEntry
 import androidx.credentials.provider.CredentialProviderService
 import androidx.credentials.provider.ProviderClearCredentialStateRequest
 import androidx.credentials.provider.PublicKeyCredentialEntry
+import androidx.credentials.provider.BiometricPromptData
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.utils.PasskeyUtils
+import android.util.Base64 as AndroidBase64
 import com.tencent.mmkv.MMKV
+import javax.crypto.Cipher
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -91,21 +96,41 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
             return BeginCreateCredentialResponse(createEntries)
         }
 
-        val userJson = JSONObject(request.requestJson).optJSONObject("user")
+        val pkJson = JSONObject(request.requestJson)
+        val pk = if (pkJson.has("publicKey")) pkJson.getJSONObject("publicKey") else pkJson
+        val userJson = pk.optJSONObject("user")
         val name = userJson?.optString("name") ?: "New Passkey"
+        
+        val authenticatorSelection = pk.optJSONObject("authenticatorSelection")
+        val userVerification = authenticatorSelection?.optString("userVerification") ?: "preferred"
+        Log.d(TAG, "handleCreatePasskeyQuery: userVerification=$userVerification")
 
         val action = credentialRepository.getCreatePasskeyAction(this) ?: DEFAULT_CREATE_PASSKEY_ACTION
 
         val data = Bundle()
         data.putString("requestJson", request.requestJson)
+        data.putString("userVerification", userVerification)
 
-        val createEntry = CreateEntry.Builder(
+        val builder = CreateEntry.Builder(
             name,
             createNewPendingIntent(action, CREATE_PASSKEY_INTENT, data)
         ).setIcon(Icon.createWithResource(this, android.R.drawable.ic_menu_add))
-            .build()
+
+        if (userVerification != "discouraged") {
+            try {
+                val cipher = credentialRepository.getBiometricCipherForEncryption()
+                val biometricPromptData = BiometricPromptData.Builder()
+                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                    .setCryptoObject(BiometricPrompt.CryptoObject(cipher))
+                    .build()
+                builder.setBiometricPromptData(biometricPromptData)
+                Log.d(TAG, "Set BiometricPromptData for CreateEntry")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to set BiometricPromptData for CreateEntry", e)
+            }
+        }
         
-        createEntries.add(createEntry)
+        createEntries.add(builder.build())
         return BeginCreateCredentialResponse(createEntries)
     }
     /**
@@ -147,10 +172,13 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
 
             val requestJsonStr = option.requestJson
             var allowCredentials: JSONArray? = null
+            var userVerification = "preferred"
             try {
                 val json = JSONObject(requestJsonStr)
                 val pk = if (json.has("publicKey")) json.getJSONObject("publicKey") else json
                 allowCredentials = pk.optJSONArray("allowCredentials")
+                userVerification = pk.optString("userVerification", "preferred")
+                Log.d(TAG, "handleGetPasskeyQuery: userVerification=$userVerification")
             } catch (e: Exception) {
                 Log.e(TAG, "Error parsing requestJson", e)
             }
@@ -179,19 +207,49 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                     data.putString("credentialId", credential.credentialId)
                     data.putString("userHandle", credential.userHandle)
                     data.putString("requestJson", option.requestJson)
+                    data.putString("userVerification", userVerification)
+                    credential.biometricIv?.let { data.putString("biometricIv", it) }
 
                     // Use a unique requestCode for each PendingIntent to avoid data being overwritten
                     val uniqueRequestCode = (credential.credentialId + option.requestJson).hashCode()
 
-                    val entry = PublicKeyCredentialEntry.Builder(
+                    val entryBuilder = PublicKeyCredentialEntry.Builder(
                         this,
                         credential.userHandle,
                         createNewPendingIntent(action, uniqueRequestCode, data),
                         option
-                    )
-                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_lock_lock))
-                        .build()
-                    allEntries.add(entry)
+                    ).setIcon(Icon.createWithResource(this, android.R.drawable.ic_lock_lock))
+
+                    if (userVerification != "discouraged") {
+                        try {
+                            val biometricPromptDataBuilder = BiometricPromptData.Builder()
+                                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                            
+                            val iv = credential.biometricIv
+                            if (iv != null) {
+                                val ivBytes = AndroidBase64.decode(iv, AndroidBase64.DEFAULT)
+                                val cipher = credentialRepository.getBiometricCipherForDecryption(ivBytes)
+                                biometricPromptDataBuilder.setCryptoObject(BiometricPrompt.CryptoObject(cipher))
+                            } else {
+                                // Even if the key isn't locked, provide a CryptoObject to enable Single Tap 
+                                // and ensure the user is authenticated for this operation.
+                                try {
+                                    val cipher = credentialRepository.getBiometricCipherForEncryption()
+                                    biometricPromptDataBuilder.setCryptoObject(BiometricPrompt.CryptoObject(cipher))
+                                } catch (e: Exception) {
+                                    Log.d(TAG, "Could not get encryption cipher for Single Tap: ${e.message}")
+                                    // Proceed without CryptoObject if getting one fails
+                                }
+                            }
+                            
+                            entryBuilder.setBiometricPromptData(biometricPromptDataBuilder.build())
+                            Log.d(TAG, "Set BiometricPromptData for entry ${credential.userHandle}")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to set BiometricPromptData for entry", e)
+                        }
+                    }
+
+                    allEntries.add(entryBuilder.build())
                 } catch (e: Exception) {
                     Log.e(TAG, "Error building PublicKeyCredentialEntry", e)
                 }

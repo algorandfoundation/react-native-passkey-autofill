@@ -7,5 +7,6 @@ data class Credential(
     val userId: String,
     val publicKey: String,
     val privateKey: String,
-    val count: Int
+    val count: Int,
+    val biometricIv: String? = null
 )

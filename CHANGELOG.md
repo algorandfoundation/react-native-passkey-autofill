@@ -1,3 +1,10 @@
+# [1.0.0-canary.14](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.13...v1.0.0-canary.14) (2026-04-10)
+
+
+### Bug Fixes
+
+* switch to maven for local AAR dependency ([f4e52b4](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/f4e52b46d618e6e8a7972e649c5d75d768e32339))
+
 # [1.0.0-canary.13](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.12...v1.0.0-canary.13) (2026-04-10)
 
 

@@ -1,3 +1,11 @@
+# [1.0.0-canary.12](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.11...v1.0.0-canary.12) (2026-04-10)
+
+
+### Features
+
+* **android:** biometrics single tap and fallback ([a6cbe4c](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/a6cbe4cf51579b15b2a219e1e06e843bb6001ed4))
+* **android:** support DER format ([492034f](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/492034f8b031e795b2575be69da8c3a1adb9096c))
+
 # [1.0.0-canary.11](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.10...v1.0.0-canary.11) (2026-03-31)
 
 ### Bug Fixes

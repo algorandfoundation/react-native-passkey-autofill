@@ -1,3 +1,10 @@
+# [1.0.0-canary.15](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.14...v1.0.0-canary.15) (2026-04-10)
+
+
+### Bug Fixes
+
+* use bouncycastle bcprov-jdk15to18 for android ([cd860b2](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/cd860b2012f2189e854137afa55c7a0c0dc1b94c))
+
 # [1.0.0-canary.14](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.13...v1.0.0-canary.14) (2026-04-10)
 
 

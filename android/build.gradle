@@ -67,7 +67,7 @@ dependencies {
   implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4"
   implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.8.4"
   implementation "io.github.zhongwuzw:mmkv:2.3.0"
-  implementation "org.bouncycastle:bcprov-jdk18on:1.78.1"
+  implementation "org.bouncycastle:bcprov-jdk15to18:1.78.1"
   implementation "androidx.datastore:datastore-preferences:1.1.1"
   implementation "co.algorand:dP256Android:1.0.0"
   implementation fileTree(dir: 'libs', include: ['*.jar'])

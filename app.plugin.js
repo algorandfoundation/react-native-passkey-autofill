@@ -206,19 +206,27 @@ const withPasskeyAutofill = (config, props = {}) => {
     return config;
   });
 
-  // 3. Add flatDir repository for local AAR
+  // 3. Add local Maven repository for local AAR
   config = withProjectBuildGradle(config, (config) => {
-    if (config.modResults.contents.includes("dP256Android-release")) {
+    if (config.modResults.contents.includes("android/libs/repo")) {
       return config;
     }
-    const libsDir = "../../android/libs";
+    // Dynamically find the path to the library's android/libs/repo directory
+    const projectRoot = config.modRequest.projectRoot;
+    const libraryRepoPath = path.join(__dirname, "android/libs/repo");
+    const relativeRepoPath = path.relative(projectRoot, libraryRepoPath);
+
+    // In Gradle, rootDir is the android directory of the app.
+    // So the path to the repo relative to rootDir is ../<relativeRepoPath>
+    const repoInjectedCode = `allprojects {
+  repositories {
+    maven {
+      url = uri("\${rootDir}/../${relativeRepoPath}")
+    }`;
+
     config.modResults.contents = config.modResults.contents.replace(
       /allprojects\s*{[\s\n]*repositories\s*{/,
-      `allprojects {
-  repositories {
-    flatDir {
-      dirs "$rootDir/${libsDir}"
-    }`,
+      repoInjectedCode,
     );
     return config;
   });

@@ -26,13 +26,13 @@ import java.security.SecureRandom
 
 interface CredentialRepository {
     val keyStore: KeyStore
-    fun saveCredential(context: Context, credential: Credential)
+    fun saveCredential(context: Context, credential: Credential, biometricCipher: Cipher? = null)
     fun generateCredentialId(keyPair: KeyPair): ByteArray
-    fun getKeyPair(context: Context, credentialId: ByteArray): KeyPair?
-    fun createDeterministicKeyPair(context: Context, origin: String, userHandle: String): KeyPair
+    fun getKeyPair(context: Context, credentialId: ByteArray, biometricCipher: Cipher? = null): KeyPair?
+    fun createDeterministicKeyPair(context: Context, origin: String, userHandle: String, biometricCipher: Cipher? = null): KeyPair
     fun getOrigin(info: CallingAppInfo): String
     fun appInfoToOrigin(info: CallingAppInfo): String
-    fun getCredential(context: Context, credentialId: ByteArray): Credential?
+    fun getCredential(context: Context, credentialId: ByteArray, biometricCipher: Cipher? = null): Credential?
     fun getCredentialByOrigin(context: Context, origin: String): Credential?
     fun getAllCredentials(context: Context): List<Credential>
     fun getPublicKeyFromKeyPair(keyPair: KeyPair?): ByteArray
@@ -45,6 +45,9 @@ interface CredentialRepository {
     fun getCreatePasskeyAction(context: Context): String?
     fun getGetPasskeyAction(context: Context): String?
     fun clearCredentials(context: Context)
+    
+    fun getBiometricCipherForEncryption(): Cipher
+    fun getBiometricCipherForDecryption(iv: ByteArray): Cipher
 
     companion object {
         const val TAG = "CredentialRepository"
@@ -53,6 +56,7 @@ interface CredentialRepository {
         const val GET_PASSKEY_ACTION_KEY = "get_passkey_action"
         const val CREATE_PASSKEY_ACTION_KEY = "create_passkey_action"
         const val MASTER_KEY_ALIAS = "co.algorand.passkeyautofill.masterkey"
+        const val BIOMETRIC_KEY_ALIAS = "co.algorand.passkeyautofill.biometric.v2"
         const val KEYCHAIN_STORAGE_NAME = "PasskeyAutofillKeychain"
         const val PASSKEY_AUTOFILL_MMKV_ID = "passkey_autofill"
         const val HD_ROOT_KEY_ID_KEY = "hd_root_key_id"
@@ -80,7 +84,8 @@ class Repository() : CredentialRepository {
         return MMKV.mmkvWithID(CredentialRepository.PASSKEY_AUTOFILL_MMKV_ID, MMKV.MULTI_PROCESS_MODE)
     }
 
-    override fun saveCredential(context: Context, credential: Credential) {
+    override fun saveCredential(context: Context, credential: Credential, biometricCipher: Cipher?) {
+        Log.d(CredentialRepository.TAG, "saveCredential started for ${credential.origin}, userHandle: ${credential.userHandle}")
         val mmkv = getPasskeysMMKV(context)
         
         // 1. Create KeyData matching @algorandfoundation/keystore
@@ -91,7 +96,20 @@ class Repository() : CredentialRepository {
         keyData.put("extractable", false)
         keyData.put("keyUsages", JSONArray(listOf("sign")))
         keyData.put("name", "Passkey: ${credential.origin}")
-        keyData.put("privateKey", JSONArray(AndroidBase64.decode(credential.privateKey, AndroidBase64.DEFAULT).map { it.toInt() and 0xFF }))
+        
+        val privateKeyBytes = AndroidBase64.decode(credential.privateKey, AndroidBase64.DEFAULT)
+        if (biometricCipher != null) {
+            Log.d(CredentialRepository.TAG, "Using biometricCipher for encryption")
+            val encryptedBytes = biometricCipher.doFinal(privateKeyBytes)
+            val encJson = JSONObject()
+            encJson.put("iv", AndroidBase64.encodeToString(biometricCipher.iv, AndroidBase64.NO_WRAP))
+            encJson.put("data", AndroidBase64.encodeToString(encryptedBytes, AndroidBase64.NO_WRAP))
+            keyData.put("privateKeyEnc", encJson)
+        } else {
+            Log.d(CredentialRepository.TAG, "No biometricCipher, saving privateKey in plain (base64 in JSON)")
+            keyData.put("privateKey", JSONArray(privateKeyBytes.map { it.toInt() and 0xFF }))
+        }
+
         keyData.put("publicKey", JSONArray(AndroidBase64.decode(credential.publicKey, AndroidBase64.DEFAULT).map { it.toInt() and 0xFF }))
         
         // Custom fields for our use
@@ -131,14 +149,17 @@ class Repository() : CredentialRepository {
                 // Basic validation to ensure it's a credential
                 if (json.has("id") && (json.has("origin") || json.has("metadata"))) {
                     val metadata = json.optJSONObject("metadata")
+                    val encJson = json.optJSONObject("privateKeyEnc")
+                    
                     credentials.add(Credential(
                         credentialId = json.getString("id"),
                         origin = metadata?.optString("origin") ?: json.optString("origin", ""),
                         userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
                         userId = metadata?.optString("userId") ?: json.optString("userId", ""),
                         publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
-                        privateKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT),
-                        count = metadata?.optInt("count") ?: json.optInt("count", 0)
+                        privateKey = if (json.has("privateKey")) AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT) else "",
+                        count = metadata?.optInt("count") ?: json.optInt("count", 0),
+                        biometricIv = encJson?.optString("iv")
                     ))
                 }
             } catch (e: Exception) {
@@ -163,22 +184,45 @@ class Repository() : CredentialRepository {
         return messageDigest.digest(publicKeyBytes)
     }
 
-    override fun getCredential(context: Context, credentialId: ByteArray): Credential? {
+    override fun getCredential(context: Context, credentialId: ByteArray, biometricCipher: Cipher?): Credential? {
         val id = AndroidBase64.encodeToString(credentialId, AndroidBase64.DEFAULT).trim()
+        Log.d(CredentialRepository.TAG, "getCredential started for id: $id")
         val mmkv = getPasskeysMMKV(context)
-        val payload = mmkv.decodeString(id) ?: return null
-        val masterKey = getMasterKey(context) ?: return null
+        val payload = mmkv.decodeString(id) ?: run {
+            Log.w(CredentialRepository.TAG, "No payload found for id: $id")
+            return null
+        }
+        val masterKey = getMasterKey(context) ?: run {
+            Log.e(CredentialRepository.TAG, "Master key not found")
+            return null
+        }
         return try {
             val json = decodeKeyData(payload, masterKey)
             val metadata = json.optJSONObject("metadata")
+            val encJson = json.optJSONObject("privateKeyEnc")
+            
+            val privateKey = if (encJson != null && biometricCipher != null) {
+                Log.d(CredentialRepository.TAG, "Decrypting privateKey with biometricCipher")
+                val data = AndroidBase64.decode(encJson.getString("data"), AndroidBase64.DEFAULT)
+                val decrypted = biometricCipher.doFinal(data)
+                AndroidBase64.encodeToString(decrypted, AndroidBase64.DEFAULT)
+            } else if (json.has("privateKey")) {
+                Log.d(CredentialRepository.TAG, "Using plain privateKey from JSON")
+                AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT)
+            } else {
+                Log.w(CredentialRepository.TAG, "No privateKey found in JSON")
+                ""
+            }
+
             Credential(
                 credentialId = json.getString("id"),
                 origin = metadata?.optString("origin") ?: json.optString("origin", ""),
                 userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
                 userId = metadata?.optString("userId") ?: json.optString("userId", ""),
                 publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
-                privateKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT),
-                count = metadata?.optInt("count") ?: json.optInt("count", 0)
+                privateKey = privateKey,
+                count = metadata?.optInt("count") ?: json.optInt("count", 0),
+                biometricIv = encJson?.optString("iv")
             )
         } catch (e: Exception) {
             null
@@ -190,24 +234,71 @@ class Repository() : CredentialRepository {
     }
 
     fun getKeyPairFromCredential(credential: Credential): KeyPair? {
+        if (credential.privateKey.isEmpty()) return null
         val publicKeyBytes = AndroidBase64.decode(credential.publicKey, AndroidBase64.DEFAULT)
         val privateKeyBytes = AndroidBase64.decode(credential.privateKey, AndroidBase64.DEFAULT)
-        val factory = KeyFactory.getInstance("EC")
-        val publicKey = factory.generatePublic(X509EncodedKeySpec(publicKeyBytes))
-        val privateKey = factory.generatePrivate(PKCS8EncodedKeySpec(privateKeyBytes))
-        return KeyPair(publicKey, privateKey)
+
+        return try {
+            // First try DER-encoded format (X509/PKCS8)
+            val factory = KeyFactory.getInstance("EC")
+            val publicKey = factory.generatePublic(X509EncodedKeySpec(publicKeyBytes))
+            val privateKey = factory.generatePrivate(PKCS8EncodedKeySpec(privateKeyBytes))
+            KeyPair(publicKey, privateKey)
+        } catch (e: Exception) {
+            // Fall back to raw EC bytes
+            try {
+                // Get the P-256 curve parameters
+                val ecGenSpec = ECGenParameterSpec("secp256r1")
+                val keyPairGen = KeyPairGenerator.getInstance("EC")
+                keyPairGen.initialize(ecGenSpec)
+                val paramSpec = (keyPairGen.generateKeyPair().public as java.security.interfaces.ECPublicKey).params
+                val factory = KeyFactory.getInstance("EC")
+
+                // privateKey is 32-byte scalar
+                val rawXY: Pair<ByteArray, ByteArray>? = when {
+                    // 65-byte uncompressed point: 04 || x(32) || y(32)
+                    publicKeyBytes.size == 65 && publicKeyBytes[0] == 0x04.toByte() ->
+                        Pair(publicKeyBytes.copyOfRange(1, 33), publicKeyBytes.copyOfRange(33, 65))
+                    // 64-byte raw x || y (no prefix)
+                    publicKeyBytes.size == 64 ->
+                        Pair(publicKeyBytes.copyOfRange(0, 32), publicKeyBytes.copyOfRange(32, 64))
+                    else -> null
+                }
+
+                if (rawXY != null) {
+                    val x = java.math.BigInteger(1, rawXY.first)
+                    val y = java.math.BigInteger(1, rawXY.second)
+                    val pubSpec = ECPublicKeySpec(ECPoint(x, y), paramSpec)
+                    val publicKey = factory.generatePublic(pubSpec)
+
+                    val s = java.math.BigInteger(1, privateKeyBytes)
+                    val privSpec = ECPrivateKeySpec(s, paramSpec)
+                    val privateKey = factory.generatePrivate(privSpec)
+
+                    KeyPair(publicKey, privateKey)
+                } else {
+                    Log.e(CredentialRepository.TAG, "Unrecognized key format: publicKey size=${publicKeyBytes.size}", e)
+                    null
+                }
+            } catch (e2: Exception) {
+                Log.e(CredentialRepository.TAG, "Failed to restore key from raw bytes", e2)
+                null
+            }
+        }
     }
 
-    override fun getKeyPair(context: Context, credentialId: ByteArray): KeyPair? {
-        val credential = getCredential(context, credentialId)
+    override fun getKeyPair(context: Context, credentialId: ByteArray, biometricCipher: Cipher?): KeyPair? {
+        val credential = getCredential(context, credentialId, biometricCipher)
         return credential?.let { getKeyPairFromCredential(it) }
     }
 
     override fun createDeterministicKeyPair(
         context: Context,
         origin: String,
-        userHandle: String
+        userHandle: String,
+        biometricCipher: Cipher?
     ): KeyPair {
+        Log.d(CredentialRepository.TAG, "createDeterministicKeyPair for origin: $origin, userHandle: $userHandle")
         val masterKey = getMasterKey(context) ?: throw IllegalStateException("Master key not found in Keystore. Ensure you have called setMasterKey(key) from JavaScript.")
         
         val mmkvAutofill = getAutofillMMKV(context)
@@ -224,6 +315,7 @@ class Repository() : CredentialRepository {
         
         val seedArray = hdRootKeyData.optJSONArray("seed") ?: hdRootKeyData.optJSONArray("privateKey")
         val derivedParentSecret = if (seedArray != null) {
+            Log.d(CredentialRepository.TAG, "Found seedArray in hdRootKeyData")
             val bytes = ByteArray(seedArray.length())
             for (i in 0 until seedArray.length()) {
                 bytes[i] = seedArray.getInt(i).toByte()
@@ -234,6 +326,7 @@ class Repository() : CredentialRepository {
                 ?: (if (hdRootKeyData.has("privateKey")) hdRootKeyData.getString("privateKey") else null)
                 ?: throw IllegalStateException("HD Root Key does not contain a seed or privateKey")
             
+            Log.d(CredentialRepository.TAG, "Found seed string in hdRootKeyData")
             if (seed.startsWith("0x")) {
                 hexToBytes(seed.substring(2))
             } else {
@@ -456,6 +549,45 @@ class Repository() : CredentialRepository {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
+    private fun getBiometricSecretKey(): SecretKey {
+        if (!keyStore.containsAlias(CredentialRepository.BIOMETRIC_KEY_ALIAS)) {
+            val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            val builder = KeyGenParameterSpec.Builder(
+                CredentialRepository.BIOMETRIC_KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setUserAuthenticationRequired(true)
+                .setInvalidatedByBiometricEnrollment(true)
+            
+            // Use both old and new APIs for maximum compatibility with time-bound unlock
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                builder.setUserAuthenticationParameters(60, KeyProperties.AUTH_BIOMETRIC_STRONG)
+            } else {
+                @Suppress("DEPRECATION")
+                builder.setUserAuthenticationValidityDurationSeconds(60)
+            }
+            
+            keyGenerator.init(builder.build())
+            keyGenerator.generateKey()
+        }
+        return keyStore.getKey(CredentialRepository.BIOMETRIC_KEY_ALIAS, null) as SecretKey
+    }
+
+    override fun getBiometricCipherForEncryption(): Cipher {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getBiometricSecretKey())
+        return cipher
+    }
+
+    override fun getBiometricCipherForDecryption(iv: ByteArray): Cipher {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, getBiometricSecretKey(), GCMParameterSpec(128, iv))
+        return cipher
+    }
+
     override fun sign(keyPair: KeyPair, payload: ByteArray): ByteArray {
         return dP256.signWithDomainSpecificKeyPair(keyPair, payload)
     }
@@ -487,13 +619,7 @@ class Repository() : CredentialRepository {
 
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     override fun getOrigin(info: CallingAppInfo): String {
-        return try {
-            info.origin ?: appInfoToOrigin(info)
-        } catch (e: NoSuchMethodError) {
-            appInfoToOrigin(info)
-        } catch (e: Exception) {
-            appInfoToOrigin(info)
-        }
+        return appInfoToOrigin(info)
     }
 
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)

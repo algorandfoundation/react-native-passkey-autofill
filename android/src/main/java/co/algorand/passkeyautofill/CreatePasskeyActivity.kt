@@ -24,8 +24,15 @@ import androidx.credentials.webauthn.FidoPublicKeyCredential
 import androidx.credentials.webauthn.PublicKeyCredentialCreationOptions
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
+import co.algorand.passkeyautofill.utils.PasskeyUtils
 import java.security.KeyPair
 import android.util.Base64 as AndroidBase64
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
@@ -41,17 +48,50 @@ class CreatePasskeyActivity : AppCompatActivity() {
     private var userHandle: String = "unknown-user"
     private var userName: String = "User"
     private var userId: String = "unknown-id"
+    private var userVerification: String = "preferred"
     private var bundleRequestJson: String? = null
     private var request: ProviderCreateCredentialRequest? = null
+    private var biometricPromptResult: Any? = null
+    private var systemUnlockedCipher: javax.crypto.Cipher? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.i(TAG, "onCreate started")
         
-        request = PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent)
+        request = try {
+            PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error retrieving request from intent", e)
+            null
+        }
+        Log.i(TAG, "Retrieved request: $request")
+        
+        // Check for system-provided biometric result (Single Tap flow)
+        try {
+            val biometricResult = request?.biometricPromptResult
+            Log.i(TAG, "biometricResult from system: $biometricResult")
+            if (biometricResult != null) {
+                this.biometricPromptResult = biometricResult
+                val authResult = biometricResult.authenticationResult
+                Log.i(TAG, "authResult from system: $authResult (${authResult?.javaClass?.name})")
+                
+                // Also try to find it in the biometricResult object itself
+                systemUnlockedCipher = if (authResult != null) {
+                    PasskeyUtils.extractCipher(authResult)
+                } else {
+                    PasskeyUtils.extractCipher(biometricResult)
+                }
+                Log.i(TAG, "systemUnlockedCipher from system: $systemUnlockedCipher")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing biometricPromptResult", e)
+        }
+
         val credentialData = intent.getBundleExtra("CREDENTIAL_DATA")
         
         if (credentialData != null) {
             bundleRequestJson = credentialData.getString("requestJson")
+            userVerification = credentialData.getString("userVerification") ?: "preferred"
         }
 
         if (request != null) {
@@ -78,6 +118,13 @@ class CreatePasskeyActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error parsing request", e)
             }
+        }
+
+        // If the system already showed a biometric prompt (Single Tap), proceed automatically
+        if (biometricPromptResult != null) {
+            Log.d(TAG, "System already showed biometric prompt (Single Tap), proceeding automatically")
+            handleCreation()
+            return
         }
 
         // Improved UI
@@ -214,8 +261,47 @@ class CreatePasskeyActivity : AppCompatActivity() {
 
     @SuppressLint("RestrictedApi")
     private fun handleCreation() {
-        try {
-            val req = request ?: throw IllegalStateException("No request found")
+        Log.d(TAG, "handleCreation started, userVerification=$userVerification")
+        lifecycleScope.launch {
+            val cipherToUse = systemUnlockedCipher ?: run {
+                if (biometricPromptResult != null) {
+                    try {
+                        val fallback = credentialRepository.getBiometricCipherForEncryption()
+                        Log.i(TAG, "Successfully obtained fallback cipher from repository (Single Tap timeout)")
+                        fallback
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Fallback cipher failed: ${e.message}")
+                        null
+                    }
+                } else {
+                    null
+                }
+            } ?: run {
+                // Only prompt for biometrics if userVerification is "required"
+                // For "preferred" and "discouraged", we can proceed without a manual biometric prompt
+                if (userVerification == "required") {
+                    Log.i(TAG, "userVerification is required, running manual biometrics")
+                    val result = biometrics(true)
+                    Log.d(TAG, "Manual biometrics result: $result")
+                    if (result == null) {
+                        Log.w(TAG, "Biometrics failed or was canceled")
+                        finish()
+                        return@launch
+                    }
+                    result.cryptoObject?.cipher
+                } else {
+                    Log.d(TAG, "userVerification is $userVerification, skipping manual biometrics")
+                    null
+                }
+            }
+            
+            Log.d(TAG, "cipherToUse: $cipherToUse")
+            
+            var finalCipher = cipherToUse
+
+            try {
+                val req = request ?: throw IllegalStateException("No request found")
+                Log.d(TAG, "Request found, origin: $origin")
             
             // Prefer using the request JSON from the bundle if available
             val rawRequestJson = bundleRequestJson ?: run {
@@ -229,6 +315,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
             } else {
                 rawRequestJson
             }
+            Log.d(TAG, "Passkey request JSON: $passkeyReqJson")
             val requestOptions = try {
                 PublicKeyCredentialCreationOptions(passkeyReqJson)
             } catch (e: org.json.JSONException) {
@@ -236,7 +323,9 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 throw e
             }
 
-            val keyPair: KeyPair = credentialRepository.createDeterministicKeyPair(this, origin, userHandle)
+            Log.d(TAG, "Creating deterministic key pair")
+            val keyPair: KeyPair = credentialRepository.createDeterministicKeyPair(this@CreatePasskeyActivity, origin, userHandle)
+            Log.d(TAG, "Generating credential ID")
             val credentialId = credentialRepository.generateCredentialId(keyPair)
             val credentialIdBase64 = AndroidBase64.encodeToString(credentialId, AndroidBase64.NO_WRAP)
 
@@ -250,8 +339,27 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 count = 0
             )
             
-            credentialRepository.saveCredential(this, credential)
+            Log.d(TAG, "Saving credential to repository")
+            try {
+                credentialRepository.saveCredential(this@CreatePasskeyActivity, credential, finalCipher)
+            } catch (e: Exception) {
+                if (e.message?.contains("user not authenticated", ignoreCase = true) == true || 
+                    e.cause?.message?.contains("user not authenticated", ignoreCase = true) == true) {
+                    Log.i(TAG, "Key is locked, triggering manual biometric prompt")
+                    val result = biometrics(true)
+                    if (result != null) {
+                        finalCipher = result.cryptoObject?.cipher
+                        Log.i(TAG, "Retrying save with manual biometric cipher")
+                        credentialRepository.saveCredential(this@CreatePasskeyActivity, credential, finalCipher)
+                    } else {
+                        throw e
+                    }
+                } else {
+                    throw e
+                }
+            }
 
+            Log.d(TAG, "Building AuthenticatorAttestationResponse")
             val response = AuthenticatorAttestationResponse(
                 requestOptions = requestOptions,
                 credentialId = credentialId,
@@ -282,6 +390,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 requestJson.getString("challenge")
             }
 
+            Log.d(TAG, "Building clientDataJSON, challenge: $challenge, origin: $sanitizedOrigin")
             val clientDataJSONString = if (sanitizedOrigin.startsWith("https://") || sanitizedOrigin.startsWith("http://")) {
                 "{\"type\":\"webauthn.create\",\"challenge\":\"$challenge\",\"origin\":\"$sanitizedOrigin\",\"crossOrigin\":false}"
             } else {
@@ -299,6 +408,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
             respJson.put("clientDataJSON", clientDataJSONb64)
 
             val createResponse = CreatePublicKeyCredentialResponse(fullJson.toString())
+            Log.d(TAG, "CreatePublicKeyCredentialResponse: ${fullJson.toString()}")
             
             PendingIntentHandler.setCreateCredentialResponse(
                 resultIntent,
@@ -306,6 +416,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
             )
             
             setResult(Activity.RESULT_OK, resultIntent)
+            Log.d(TAG, "Result set to OK")
             ReactNativePasskeyAutofillModule.instance?.sendEvent("onPasskeyAdded", Bundle().apply {
                 putBoolean("success", true)
             })
@@ -314,5 +425,47 @@ class CreatePasskeyActivity : AppCompatActivity() {
             setResult(Activity.RESULT_CANCELED)
         }
         finish()
+    }
+}
+
+
+    private suspend fun biometrics(needsCipher: Boolean): BiometricPrompt.AuthenticationResult? {
+        return suspendCoroutine { continuation ->
+            val biometricPrompt = BiometricPrompt(
+                this,
+                ContextCompat.getMainExecutor(this),
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        super.onAuthenticationSucceeded(result)
+                        continuation.resume(result)
+                    }
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        super.onAuthenticationError(errorCode, errString)
+                        continuation.resume(null)
+                    }
+                    override fun onAuthenticationFailed() {
+                        super.onAuthenticationFailed()
+                    }
+                }
+            )
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Create Passkey")
+                .setSubtitle("Authenticate to save your passkey")
+                .setNegativeButtonText("Cancel")
+                .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                .build()
+            
+            if (needsCipher) {
+                try {
+                    val cipher = credentialRepository.getBiometricCipherForEncryption()
+                    biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to initialize biometric prompt with cipher", e)
+                    biometricPrompt.authenticate(promptInfo)
+                }
+            } else {
+                biometricPrompt.authenticate(promptInfo)
+            }
+        }
     }
 }

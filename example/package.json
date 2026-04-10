@@ -12,8 +12,8 @@
     "test": "jest"
   },
   "dependencies": {
-    "@algorandfoundation/keystore": "^1.0.0-canary.12",
-    "@algorandfoundation/react-native-keystore": "^1.0.0-canary.6",
+    "@algorandfoundation/keystore": "^1.0.0-canary.14",
+    "@algorandfoundation/react-native-keystore": "^1.0.0-canary.9",
     "@algorandfoundation/react-native-passkey-autofill": "workspace:*",
     "@algorandfoundation/wallet-provider": "^1.0.0-canary.5",
     "@noble/hashes": "^2.0.1",

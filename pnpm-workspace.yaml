@@ -8,5 +8,7 @@ minimumReleaseAgeExclude:
   - "@expo/dom-webview"
   - "@types/node"
   - "@algorandfoundation/wallet-provider"
+  - "@algorandfoundation/react-native-keystore"
+  - "@algorandfoundation/keystore"
   - "@typescript-eslint/types"
   - "@typescript-eslint/visitor-keys"

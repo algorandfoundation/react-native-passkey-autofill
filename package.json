@@ -41,7 +41,7 @@
     "open:android": "open -a \"Android Studio\" example/android"
   },
   "dependencies": {
-    "@algorandfoundation/react-native-keystore": "^1.0.0-canary.6"
+    "@algorandfoundation/react-native-keystore": "^1.0.0-canary.9"
   },
   "devDependencies": {
     "@expo/config-plugins": "^9.0.0",

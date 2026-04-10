@@ -237,10 +237,54 @@ class Repository() : CredentialRepository {
         if (credential.privateKey.isEmpty()) return null
         val publicKeyBytes = AndroidBase64.decode(credential.publicKey, AndroidBase64.DEFAULT)
         val privateKeyBytes = AndroidBase64.decode(credential.privateKey, AndroidBase64.DEFAULT)
-        val factory = KeyFactory.getInstance("EC")
-        val publicKey = factory.generatePublic(X509EncodedKeySpec(publicKeyBytes))
-        val privateKey = factory.generatePrivate(PKCS8EncodedKeySpec(privateKeyBytes))
-        return KeyPair(publicKey, privateKey)
+
+        return try {
+            // First try DER-encoded format (X509/PKCS8)
+            val factory = KeyFactory.getInstance("EC")
+            val publicKey = factory.generatePublic(X509EncodedKeySpec(publicKeyBytes))
+            val privateKey = factory.generatePrivate(PKCS8EncodedKeySpec(privateKeyBytes))
+            KeyPair(publicKey, privateKey)
+        } catch (e: Exception) {
+            // Fall back to raw EC bytes
+            try {
+                // Get the P-256 curve parameters
+                val ecGenSpec = ECGenParameterSpec("secp256r1")
+                val keyPairGen = KeyPairGenerator.getInstance("EC")
+                keyPairGen.initialize(ecGenSpec)
+                val paramSpec = (keyPairGen.generateKeyPair().public as java.security.interfaces.ECPublicKey).params
+                val factory = KeyFactory.getInstance("EC")
+
+                // privateKey is 32-byte scalar
+                val rawXY: Pair<ByteArray, ByteArray>? = when {
+                    // 65-byte uncompressed point: 04 || x(32) || y(32)
+                    publicKeyBytes.size == 65 && publicKeyBytes[0] == 0x04.toByte() ->
+                        Pair(publicKeyBytes.copyOfRange(1, 33), publicKeyBytes.copyOfRange(33, 65))
+                    // 64-byte raw x || y (no prefix)
+                    publicKeyBytes.size == 64 ->
+                        Pair(publicKeyBytes.copyOfRange(0, 32), publicKeyBytes.copyOfRange(32, 64))
+                    else -> null
+                }
+
+                if (rawXY != null) {
+                    val x = java.math.BigInteger(1, rawXY.first)
+                    val y = java.math.BigInteger(1, rawXY.second)
+                    val pubSpec = ECPublicKeySpec(ECPoint(x, y), paramSpec)
+                    val publicKey = factory.generatePublic(pubSpec)
+
+                    val s = java.math.BigInteger(1, privateKeyBytes)
+                    val privSpec = ECPrivateKeySpec(s, paramSpec)
+                    val privateKey = factory.generatePrivate(privSpec)
+
+                    KeyPair(publicKey, privateKey)
+                } else {
+                    Log.e(CredentialRepository.TAG, "Unrecognized key format: publicKey size=${publicKeyBytes.size}", e)
+                    null
+                }
+            } catch (e2: Exception) {
+                Log.e(CredentialRepository.TAG, "Failed to restore key from raw bytes", e2)
+                null
+            }
+        }
     }
 
     override fun getKeyPair(context: Context, credentialId: ByteArray, biometricCipher: Cipher?): KeyPair? {

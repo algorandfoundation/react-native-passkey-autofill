@@ -11,26 +11,63 @@ public class ReactNativePasskeyAutofillModule: Module {
     Name("ReactNativePasskeyAutofill")
 
     Events("onPasskeyAdded", "onPasskeyAuthenticated")
+    
+    OnCreate {
+      let appGroupId = Bundle.main.object(forInfoDictionaryKey: "AppGroupIdentifier") as? String
+      CredentialRepository.shared.initialize(appGroupId: appGroupId)
+      
+      let center = CFNotificationCenterGetDarwinNotifyCenter()
+      let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+      
+      CFNotificationCenterAddObserver(center, observer, { (_, observer, name, _, _) in
+        guard let observer = observer, let name = name else { return }
+        let module = Unmanaged<ReactNativePasskeyAutofillModule>.fromOpaque(observer).takeUnretainedValue()
+        let nameString = (name.rawValue as String)
+        
+        if nameString == "co.algorand.passkeyautofill.onPasskeyAdded" {
+          module.sendEvent("onPasskeyAdded", ["success": true])
+        } else if nameString == "co.algorand.passkeyautofill.onPasskeyAuthenticated" {
+          module.sendEvent("onPasskeyAuthenticated", ["success": true])
+        }
+      }, "co.algorand.passkeyautofill.onPasskeyAdded" as CFString, nil, .deliverImmediately)
+      
+      CFNotificationCenterAddObserver(center, observer, { (_, observer, name, _, _) in
+        guard let observer = observer, let name = name else { return }
+        let module = Unmanaged<ReactNativePasskeyAutofillModule>.fromOpaque(observer).takeUnretainedValue()
+        let nameString = (name.rawValue as String)
+        
+        if nameString == "co.algorand.passkeyautofill.onPasskeyAdded" {
+          module.sendEvent("onPasskeyAdded", ["success": true])
+        } else if nameString == "co.algorand.passkeyautofill.onPasskeyAuthenticated" {
+          module.sendEvent("onPasskeyAuthenticated", ["success": true])
+        }
+      }, "co.algorand.passkeyautofill.onPasskeyAuthenticated" as CFString, nil, .deliverImmediately)
+    }
+    
+    OnDestroy {
+      let center = CFNotificationCenterGetDarwinNotifyCenter()
+      let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+      CFNotificationCenterRemoveEveryObserver(center, observer)
+    }
 
     AsyncFunction("setMasterKey") { (secret: String) in
-      // TODO: Implement for iOS
+      CredentialRepository.shared.saveMasterKey(secret: secret)
     }
 
     AsyncFunction("setHdRootKeyId") { (id: String) in
-      // TODO: Implement for iOS
+      CredentialRepository.shared.saveHdRootKeyId(id: id)
     }
 
     AsyncFunction("getHdRootKeyId") { () -> String? in
-      // TODO: Implement for iOS
-      return nil
+      return CredentialRepository.shared.getHdRootKeyId()
     }
 
     AsyncFunction("clearCredentials") {
-      // TODO: Implement for iOS
+      CredentialRepository.shared.clearCredentials()
     }
 
     AsyncFunction("configureIntentActions") { (getPasskeyAction: String, createPasskeyAction: String) in
-      // TODO: Implement for iOS
+      CredentialRepository.shared.configureIntentActions(getPasskeyAction: getPasskeyAction, createPasskeyAction: createPasskeyAction)
     }
 
     // Enables the module to be used as a native view. Definition components that are accepted as part of the

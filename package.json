@@ -59,7 +59,8 @@
     "oxlint": "^1.58.0",
     "react-native": "0.82.1",
     "semantic-release": "^25.0.3",
-    "ts-jest": "^29.0.5"
+    "ts-jest": "^29.0.5",
+    "typescript": "~5.9.3"
   },
   "peerDependencies": {
     "expo": "*",

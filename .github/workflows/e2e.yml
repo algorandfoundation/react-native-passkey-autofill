@@ -1,0 +1,520 @@
+name: E2E
+
+on:
+  # Opt-in only: E2E jobs boot emulators/simulators and take several
+  # minutes. Trigger them manually or on PRs that add the `e2e` label.
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [main, release]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android (UiAutomator2)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [34]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Free disk space on the ubuntu-latest runner before pulling the
+      # Android system image. GitHub-hosted runners ship with ~14 GB free,
+      # but `sdkmanager --install system-images;android-34;google_apis;x86_64`
+      # alone is several GB, and combined with the pnpm store, Gradle
+      # caches, the JDK, the Android SDK, and RN build artifacts the
+      # emulator-runner step was failing with:
+      #   "Warning: An error occurred while preparing SDK package Google
+      #    APIs Intel x86_64 Atom System Image: No space left on device."
+      # Remove large pre-installed toolchains we don't use (dotnet, haskell,
+      # extra Android SDK images, Boost, CodeQL, swap) to reclaim ~20 GB.
+      - name: Free up disk space
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+            /usr/local/share/boost /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules \
+            /usr/share/swift || true
+          sudo docker image prune --all --force || true
+          echo "After:"; df -h /
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+
+      # Cache Gradle's user-home (dependencies, wrapper distributions) across
+      # runs. The key is scoped to hashed gradle files + lockfile so a gradle
+      # or dep bump invalidates it, and restore-keys lets unrelated branches
+      # start from the most recent cache instead of a cold cache.
+      - name: Cache Gradle (user home)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-home-${{ runner.os }}-${{ hashFiles('example/android/**/*.gradle*', 'example/android/**/gradle-wrapper.properties', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            gradle-home-${{ runner.os }}-
+
+      # Cache the project-level gradle build state (configuration cache,
+      # transformed deps, incremental build outputs). This is what actually
+      # makes a repeat `:app:assembleRelease` incremental — without it, every
+      # run re-runs codegen + C/C++ configure even if ~/.gradle is warm.
+      - name: Cache Gradle (project build state)
+        uses: actions/cache@v4
+        with:
+          path: |
+            example/android/.gradle
+            example/android/app/build
+            example/android/build
+            ~/.gradle/caches/transforms-*
+            ~/.gradle/caches/build-cache-*
+          key: gradle-build-${{ runner.os }}-api${{ matrix.api-level }}-${{ hashFiles('example/android/**/*.gradle*', 'pnpm-lock.yaml', 'example/package.json') }}
+          restore-keys: |
+            gradle-build-${{ runner.os }}-api${{ matrix.api-level }}-
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Appium drivers
+        run: pnpm run appium:setup:android
+
+      - name: Prebuild example app
+        run: cd example && npx expo prebuild --platform android
+
+      - name: Build release APK (JS bundle embedded)
+        # A debug APK expects Metro to serve the JS bundle at runtime; nothing
+        # inside the emulator-runner script below starts Metro, so a debug
+        # build would install but render nothing ("Unable to load script from
+        # assets"), and every waitForDisplayed would time out. A release build
+        # embeds the bundle via gradle's :app:bundleReleaseJsAndAssets, so the
+        # app renders standalone — matching the local `e2e:build:android`
+        # script which already uses `--variant release --no-bundler`.
+        run: cd example/android && ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Locate APK
+        id: apk
+        run: |
+          set -euo pipefail
+          APK=$(find example/android/app/build/outputs/apk/release -name "*.apk" | head -n1)
+          if [ -z "$APK" ]; then
+            echo "No release APK produced by gradle" >&2
+            find example/android/app/build/outputs -name "*.apk" || true
+            exit 1
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Using APK: $APK"
+
+      # Cache the created AVD + system image so subsequent runs skip the
+      # expensive `avdmanager create` / `sdkmanager` install step. Keyed on
+      # api-level so matrix variants don't collide.
+      - name: Cache AVD
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ runner.os }}-api${{ matrix.api-level }}-google_apis_playstore-x86_64
+
+      - name: Run E2E (Android emulator)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          # Use the Play Store system image (not plain `google_apis`). We are
+          # bound to Android 14's Credential Manager / Credential Provider
+          # services, and the Play Store image ships the complete biometric
+          # + Settings stack so `android.settings.FINGERPRINT_ENROLL` resolves
+          # and the fingerprint HAL is present — both required by the e2e
+          # harness (`e2e/driver/fingerprint.ts`) to enroll a finger and
+          # close the Credential Manager biometric sheet via
+          # `adb emu finger touch`.
+          target: google_apis_playstore
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 900
+          # When the AVD cache hit, don't recreate it — this alone saves
+          # several minutes per run.
+          force-avd-creation: ${{ steps.avd-cache.outputs.cache-hit != 'true' }}
+          script: |
+            # Prep the emulator for the E2E run.
+            # - Disable animations so waitForDisplayed doesn't race.
+            # - Enroll a device PIN: required by the fingerprint-enrollment
+            #   wizard (it gates on "Confirm your PIN" before letting us
+            #   register a finger) and is the device-credential fallback
+            #   Credential Manager uses when no finger is enrolled.
+            # - Fingerprint enrollment itself is driven from the test harness
+            #   (`e2e/driver/fingerprint.ts` → `ensureAndroidFingerprintEnrolled`):
+            #   it opens `android.settings.FINGERPRINT_ENROLL` via adb, clicks
+            #   through the wizard with UiAutomator2, and feeds simulated
+            #   touches via host-side `adb emu finger touch <id>` (the old
+            #   `adb shell 'nc localhost 5554'` line was a no-op — nc was
+            #   running inside the guest, not against the host console).
+            adb wait-for-device
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
+            # Disable Play Protect's package verifier on Play Store images.
+            # This prevents/delays the `io.appium.settings` helper app
+            # and other test artifacts from being blocked or showing a UI
+            # prompt during the run.
+            adb shell settings put global package_verifier_enable 0
+            adb shell settings put global verifier_verify_adb_installs 0
+            adb shell settings put global package_verifier_user_consent -1
+            adb shell settings put global upload_apk_enable 0
+            # Set a device PIN (idempotent): if the AVD snapshot cache
+            # already has a PIN from a prior run, `set-pin 1111` alone
+            # fails with "Credential can't be null or empty" (it's
+            # treated as a change-PIN and needs `--old`). We first clear
+            # any existing credential with the known PIN, then set it.
+            adb shell locksettings clear --old 1111 || true
+            adb shell locksettings set-pin 1111 || true
+            # Diagnostics printed once per run so we can see — in the job
+            # log — whether the AVD actually supports the enrollment
+            # intent and exposes a fingerprint HAL. These are non-fatal.
+            adb shell pm list features | grep -i fingerprint || echo "[diag] NO fingerprint PackageManager feature"
+            adb shell cmd package resolve-activity -a android.settings.BIOMETRIC_ENROLL | head -n 20 || true
+            adb shell cmd package resolve-activity -a android.settings.FINGERPRINT_ENROLL | head -n 20 || true
+            adb shell dumpsys fingerprint | head -n 40 || true
+
+            # `reactivecircus/android-emulator-runner` invokes each line of
+            # `script:` in its own `sh -c` subshell, so neither
+            # `export VAR=...` on a preceding line nor `\` line-continuations
+            # work: the `export` doesn't persist, and a trailing `\` is fed
+            # to the next `sh -c` as a literal arg (producing the historical
+            # `/usr/bin/sh: 1: \: not found`). Keep the whole invocation on
+            # a single physical line so all env vars reach the `pnpm` process.
+            E2E_PLATFORM=android E2E_APP_PATH="${{ github.workspace }}/${{ steps.apk.outputs.path }}" ANDROID_PLATFORM_VERSION="14" pnpm run e2e:android
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-artifacts-android-${{ matrix.api-level }}
+          path: ${{ steps.apk.outputs.path }}
+          archive: false
+          if-no-files-found: ignore
+
+      - name: Upload Screenshot (App Start)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshot-app-start-android-${{ matrix.api-level }}
+          path: e2e/*-app-start.png
+          archive: false
+          if-no-files-found: ignore
+
+      - name: Upload Screenshot (XHD Key)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshot-xhd-android-${{ matrix.api-level }}
+          path: e2e/*-xhd-key-created-alert.png
+          archive: false
+          if-no-files-found: ignore
+
+      - name: Upload Screenshot (Passkey Success)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshot-passkey-android-${{ matrix.api-level }}
+          path: e2e/*-passkey-create-success.png
+          archive: false
+          if-no-files-found: ignore
+
+  ios:
+    name: iOS (XCUITest)
+    if:
+      false #>-
+      #github.event_name == 'workflow_dispatch' ||
+      #contains(github.event.pull_request.labels.*.name, 'e2e')
+    # React Native 0.82+ requires Xcode >= 16.1. macos-14 ships Xcode 15.x,
+    # so use macos-15 which has Xcode 16.x available.
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Select Xcode 16
+        # Pick the highest available Xcode >= 16.1 on the runner.
+        run: |
+          XCODE_APP=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -n1)
+          if [ -z "$XCODE_APP" ]; then
+            echo "No Xcode 16.x installation found under /Applications" >&2
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          echo "Selecting $XCODE_APP"
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Appium drivers
+        run: pnpm run appium:setup:ios
+
+      - name: Prebuild example app
+        run: cd example && npx expo prebuild --platform ios
+
+      # Cache the CocoaPods spec repo + downloaded pod sources. Keyed on the
+      # generated Podfile.lock so a pod bump invalidates; restore-keys let a
+      # miss still reuse most pod archives.
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+            example/ios/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles('example/ios/Podfile.lock', 'example/package.json', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            pods-${{ runner.os }}-
+
+      - name: Install CocoaPods
+        run: cd example/ios && pod install --repo-update
+
+      # Scope Swift 6 language mode to `ExpoModulesCore` only.
+      #
+      # `expo-modules-core@55.x` requires Swift 6 to compile (it uses
+      # `@MainActor` on protocol-conformance extensions — a Swift 6
+      # language-mode feature). Applying `SWIFT_VERSION=6.0` globally via
+      # `xcodebuild` unblocks that pod but then breaks other pods authored
+      # for Swift 5 concurrency (e.g. `react-native-passkey@3.3.x` fails
+      # with "call to main actor-isolated ... in a synchronous nonisolated
+      # context") — see https://github.com/expo/expo/issues/42525.
+      #
+      # A previous attempt patched the target's `buildSettings` via the
+      # `xcodeproj` gem; in CI that didn't take effect because CocoaPods
+      # layers the per-pod `.xcconfig` (BASE_CONFIGURATION_REFERENCE) on
+      # top of target-level settings for assignments CocoaPods controls —
+      # including `SWIFT_VERSION`, which CocoaPods writes into the
+      # xcconfig from the podspec's declared `swift_version`. Editing the
+      # target build-settings dict alone is therefore insufficient.
+      #
+      # Instead, patch CocoaPods' generated xcconfig files directly: both
+      # Debug and Release, and additionally set the target-level setting
+      # as a belt-and-suspenders measure. The xcconfig append is what
+      # actually wins at xcodebuild time; the target patch ensures Xcode
+      # tooling (e.g. `xcodebuild -showBuildSettings`) reports Swift 6
+      # consistently for this pod target only.
+      - name: Scope Swift 6 to ExpoModulesCore pod target
+        run: |
+          set -euo pipefail
+          cd example/ios
+          support_dir="Pods/Target Support Files/ExpoModulesCore"
+          if [ ! -d "$support_dir" ]; then
+            echo "ExpoModulesCore Target Support Files not found:" >&2
+            ls "Pods/Target Support Files" || true
+            exit 1
+          fi
+          # Append to every xcconfig CocoaPods generated for ExpoModulesCore
+          # (Debug/Release, plus any custom configurations). Later entries
+          # override earlier ones for the same key in an xcconfig file.
+          patched=0
+          for f in "$support_dir"/ExpoModulesCore.*.xcconfig; do
+            [ -f "$f" ] || continue
+            echo "" >> "$f"
+            echo "// Patched by CI: expo-modules-core@55 requires Swift 6" >> "$f"
+            echo "SWIFT_VERSION = 6.0" >> "$f"
+            echo "Appended SWIFT_VERSION=6.0 to $f"
+            patched=$((patched + 1))
+          done
+          if [ "$patched" -eq 0 ]; then
+            echo "No ExpoModulesCore xcconfig files found to patch" >&2
+            ls "$support_dir" || true
+            exit 1
+          fi
+          # Also patch the target's own buildSettings so the value is
+          # authoritative in the project file itself.
+          ruby -e '
+            require "xcodeproj"
+            proj = Xcodeproj::Project.open("Pods/Pods.xcodeproj")
+            targets = proj.targets.select { |t| t.name == "ExpoModulesCore" }
+            if targets.empty?
+              warn "ExpoModulesCore target not found in Pods.xcodeproj"
+              exit 1
+            end
+            targets.each do |t|
+              t.build_configurations.each do |c|
+                c.build_settings["SWIFT_VERSION"] = "6.0"
+              end
+            end
+            proj.save
+            puts "Set SWIFT_VERSION=6.0 on #{targets.size} ExpoModulesCore target configuration(s)"
+          '
+
+      - name: Verify ExpoModulesCore SWIFT_VERSION
+        # Print the resolved SWIFT_VERSION that xcodebuild will actually use
+        # for the ExpoModulesCore pod target. If this prints anything other
+        # than `SWIFT_VERSION = 6.0`, the patch above did not take effect
+        # and the build will fail with "unknown attribute 'MainActor'".
+        run: |
+          set -o pipefail
+          cd example/ios
+          xcrun xcodebuild -showBuildSettings \
+            -workspace "$(ls -d *.xcworkspace | head -n1)" \
+            -scheme ExpoModulesCore \
+            -configuration Release 2>/dev/null \
+            | awk '/SWIFT_VERSION/ {print; exit}' \
+            || echo "warning: could not read SWIFT_VERSION for ExpoModulesCore"
+
+      # Cache Xcode DerivedData (compiled RN/Expo/pods, module caches). A warm
+      # DerivedData makes a repeat `xcodebuild` close to incremental; it's
+      # keyed on Podfile.lock + gradle-analog inputs for iOS so API changes
+      # invalidate correctly.
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: |
+            example/ios/build
+            ~/Library/Developer/Xcode/DerivedData
+          key: xcode-dd-${{ runner.os }}-${{ hashFiles('example/ios/Podfile.lock', 'example/package.json', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            xcode-dd-${{ runner.os }}-
+
+      - name: Build example (iOS Simulator)
+        # Build -configuration Release so the JS bundle is embedded in the
+        # .app (via the React Native "Bundle React Native code and images"
+        # build phase). A Debug build would expect Metro to serve JS at
+        # runtime, but nothing in this job starts Metro — the app would
+        # install and render a blank screen under Appium and every
+        # waitForDisplayed would time out. This mirrors the Android job
+        # (which assembles :app:assembleRelease) and the local
+        # `e2e:build:ios` script (`expo run:ios --configuration Release`).
+        run: |
+          set -o pipefail
+          cd example/ios
+          # Pick the first workspace/scheme produced by `expo prebuild` so we
+          # don't hard-code a name that might differ from the app slug.
+          WORKSPACE=$(ls -d *.xcworkspace | head -n1)
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "Building workspace=$WORKSPACE scheme=$SCHEME"
+          # Note: Swift 6 language mode is required by `expo-modules-core@55.x`
+          # (see https://github.com/expo/expo/issues/42525) but breaks other
+          # pods authored for Swift 5 concurrency (e.g. `react-native-passkey`).
+          # We scope the Swift 6 override to the `ExpoModulesCore` pod target
+          # in a dedicated step after `pod install`, so DO NOT pass
+          # `SWIFT_VERSION=6.0` globally here.
+          xcrun xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | xcpretty
+
+      - name: Locate and zip .app bundle
+        id: app
+        # Appium's XCUITest driver (via @appium/support) unconditionally invokes
+        # `unzip` on the configured `app` capability and then falls back to a JS
+        # unzip (yauzl) which `fs.open()`s the path — passing a `.app` directory
+        # reproduces EISDIR. Zipping the `.app` first sidesteps that code path.
+        run: |
+          set -euo pipefail
+          APP=$(find example/ios/build/Build/Products/Release-iphonesimulator -maxdepth 2 -name "*.app" | head -n1)
+          if [ -z "$APP" ]; then
+            echo "No .app was produced by xcodebuild" >&2
+            exit 1
+          fi
+          ZIP="${APP%.app}.zip"
+          (cd "$(dirname "$APP")" && zip -r -y -q "$(basename "$ZIP")" "$(basename "$APP")")
+          echo "path=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "Using app: $ZIP"
+
+      - name: Boot iOS Simulator
+        id: sim
+        run: |
+          DEVICE="iPhone 15"
+          RUNTIME=$(xcrun simctl list runtimes available -j | python3 -c "import json,sys; r=[x for x in json.load(sys.stdin)['runtimes'] if x['platform']=='iOS']; print(sorted(r, key=lambda x:x['version'])[-1]['identifier'])")
+          UDID=$(xcrun simctl create "e2e-$DEVICE" "$DEVICE" "$RUNTIME")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices booted
+
+      - name: Enroll simulator biometric (Face ID)
+        # Mirror the Android job's PIN/fingerprint enrollment: passkey /
+        # WebAuthn ceremonies on iOS require the device to present a
+        # biometric or device-credential prompt. The iOS simulator has no
+        # passcode and no enrolled Face ID by default, so ASAuthorization
+        # would fail or surface a UI the tests don't drive. Toggling
+        # `com.apple.BiometricKit.enrollmentChanged` via notifyutil enrolls
+        # Face ID on the booted simulator (best-effort; non-fatal).
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          xcrun simctl spawn "$UDID" notifyutil -s com.apple.BiometricKit.enrollmentChanged 1 || true
+          xcrun simctl spawn "$UDID" notifyutil -p com.apple.BiometricKit.enrollmentChanged || true
+
+      - name: Run E2E (iOS simulator)
+        env:
+          E2E_PLATFORM: ios
+          IOS_UDID: ${{ steps.sim.outputs.udid }}
+          E2E_APP_PATH: ${{ github.workspace }}/${{ steps.app.outputs.path }}
+        run: pnpm run e2e:ios
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-artifacts-ios
+          path: ${{ steps.app.outputs.path }}
+          archive: false
+          if-no-files-found: ignore
+
+      - name: Upload Screenshot (App Start)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshot-app-start-ios
+          path: e2e/*-app-start.png
+          archive: false
+          if-no-files-found: ignore
+
+      - name: Upload Screenshot (XHD Key)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshot-xhd-ios
+          path: e2e/*-xhd-key-created-alert.png
+          archive: false
+          if-no-files-found: ignore
+
+      - name: Upload Screenshot (Passkey Success)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshot-passkey-ios
+          path: e2e/*-passkey-create-success.png
+          archive: false
+          if-no-files-found: ignore

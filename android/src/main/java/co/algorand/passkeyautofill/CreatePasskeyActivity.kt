@@ -53,6 +53,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
     private var request: ProviderCreateCredentialRequest? = null
     private var biometricPromptResult: Any? = null
     private var systemUnlockedCipher: javax.crypto.Cipher? = null
+    private var isHandling: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -127,6 +128,13 @@ class CreatePasskeyActivity : AppCompatActivity() {
             return
         }
 
+        // Auto-trigger creation flow
+        handleCreation()
+    }
+
+    private fun setupUI() {
+        if (isFinishing || isDestroyed) return
+        
         // Improved UI
         val layout = LinearLayout(this).apply {
             val padding = (32 * resources.displayMetrics.density).toInt()
@@ -226,6 +234,11 @@ class CreatePasskeyActivity : AppCompatActivity() {
         
         val confirmButton = Button(this).apply {
             text = "Create Passkey"
+            // Stable accessibility id for E2E tests (`~create-passkey-confirm`).
+            // The Create Passkey activity intermittently appears on top of the
+            // system biometric prompt, so tests drive this explicit id rather
+            // than depending on localised button text.
+            contentDescription = "create-passkey-confirm"
             setOnClickListener {
                 handleCreation()
             }
@@ -240,6 +253,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
 
         val cancelButton = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
             text = "Cancel"
+            contentDescription = "create-passkey-cancel"
             setOnClickListener {
                 setResult(RESULT_CANCELED)
                 finish()
@@ -261,6 +275,8 @@ class CreatePasskeyActivity : AppCompatActivity() {
 
     @SuppressLint("RestrictedApi")
     private fun handleCreation() {
+        if (isHandling) return
+        isHandling = true
         Log.d(TAG, "handleCreation started, userVerification=$userVerification")
         lifecycleScope.launch {
             val cipherToUse = systemUnlockedCipher ?: run {
@@ -285,7 +301,8 @@ class CreatePasskeyActivity : AppCompatActivity() {
                     Log.d(TAG, "Manual biometrics result: $result")
                     if (result == null) {
                         Log.w(TAG, "Biometrics failed or was canceled")
-                        finish()
+                        setupUI() // Show UI as fallback
+                        isHandling = false
                         return@launch
                     }
                     result.cryptoObject?.cipher
@@ -420,14 +437,14 @@ class CreatePasskeyActivity : AppCompatActivity() {
             ReactNativePasskeyAutofillModule.instance?.sendEvent("onPasskeyAdded", Bundle().apply {
                 putBoolean("success", true)
             })
+            finish()
         } catch (e: Exception) {
             Log.e(TAG, "Error during passkey creation", e)
-            setResult(Activity.RESULT_CANCELED)
+            setupUI() // Show UI on error
+            isHandling = false
         }
-        finish()
     }
-}
-
+    }
 
     private suspend fun biometrics(needsCipher: Boolean): BiometricPrompt.AuthenticationResult? {
         return suspendCoroutine { continuation ->

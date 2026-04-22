@@ -128,7 +128,7 @@ The project includes a GitHub Actions workflow that automatically runs linting, 
 
 ### Integration Testing (E2E)
 
-For full end-to-end testing that covers the bridge between JavaScript and Native, we recommend using [Maestro](https://maestro.mobile.dev/). It provides a clean, YAML-based way to automate UI flows and verify the integration of the Passkey Autofill service with the system UI.
+Full end-to-end tests driving the example app with Appium and WebdriverIO are available in the [`e2e/`](./e2e) directory. These tests exercise the entire passkey creation and usage flow on Android emulators and iOS simulators. See the [E2E README](./e2e/README.md) for more details.
 
 ## 📱 Example App
 

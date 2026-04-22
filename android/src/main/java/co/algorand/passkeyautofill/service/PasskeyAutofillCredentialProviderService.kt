@@ -50,6 +50,25 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         const val CREATE_PASSKEY_INTENT = 2
         const val DEFAULT_GET_PASSKEY_ACTION = "co.algorand.passkeyautofill.GET_PASSKEY"
         const val DEFAULT_CREATE_PASSKEY_ACTION = "co.algorand.passkeyautofill.CREATE_PASSKEY"
+
+        /**
+         * MMKV key holding the last time Android routed a credential request to
+         * this service. Set from both `onBeginCreate` and `onBeginGet` callbacks.
+         * Consumed by `ReactNativePasskeyAutofillModule.isProviderActive` as a
+         * reliable "this app is a registered provider" signal, since the raw
+         * `Settings.Secure("credential_service")` key is @hide-restricted on
+         * Android 12+ and not readable from regular apps.
+         */
+        const val KEY_LAST_INVOKED_AT_MS = "provider_last_invoked_at_ms"
+
+        internal fun stampActivated(context: android.content.Context) {
+            try {
+                MMKV.initialize(context)
+                MMKV.defaultMMKV()?.encode(KEY_LAST_INVOKED_AT_MS, System.currentTimeMillis())
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to stamp provider activation: ${e.message}")
+            }
+        }
     }
     /**
      * Handle Create Credential Requests
@@ -60,6 +79,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginCreateCredentialResponse, CreateCredentialException>
     ) {
+        stampActivated(this)
         val response: BeginCreateCredentialResponse? = processCreateCredentialRequest(request)
         if (response != null) {
             callback.onResult(response)
@@ -142,6 +162,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginGetCredentialResponse, GetCredentialException>,
     ) {
+        stampActivated(this)
         try {
             val response = processGetCredentialRequest(request)
             callback.onResult(response)

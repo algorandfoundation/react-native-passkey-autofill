@@ -30,7 +30,8 @@
       [
         "@algorandfoundation/react-native-passkey-autofill",
         {
-          "site": "https://debug.liquidauth.com"
+          "site": "https://debug.liquidauth.com",
+          "label": "Passkey AutoFill Example"
         }
       ]
     ]

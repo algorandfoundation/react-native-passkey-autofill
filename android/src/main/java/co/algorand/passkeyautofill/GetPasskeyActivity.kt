@@ -54,6 +54,7 @@ class GetPasskeyActivity : AppCompatActivity() {
     private var request: ProviderGetCredentialRequest? = null
     private var biometricPromptResult: Any? = null
     private var systemUnlockedCipher: javax.crypto.Cipher? = null
+    private var isHandling: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,6 +125,13 @@ class GetPasskeyActivity : AppCompatActivity() {
             return
         }
 
+        // Auto-trigger assertion flow
+        handleAssertion()
+    }
+
+    private fun setupUI() {
+        if (isFinishing || isDestroyed) return
+        
         // Improved UI
         val layout = LinearLayout(this).apply {
             val padding = (32 * resources.displayMetrics.density).toInt()
@@ -214,6 +222,8 @@ class GetPasskeyActivity : AppCompatActivity() {
 
         val confirmButton = Button(this).apply {
             text = "Sign In"
+            // Stable accessibility id for E2E tests (`~get-passkey-confirm`).
+            contentDescription = "get-passkey-confirm"
             setOnClickListener {
                 handleAssertion()
             }
@@ -228,6 +238,7 @@ class GetPasskeyActivity : AppCompatActivity() {
 
         val cancelButton = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
             text = "Cancel"
+            contentDescription = "get-passkey-cancel"
             setOnClickListener {
                 setResult(RESULT_CANCELED)
                 finish()
@@ -249,6 +260,8 @@ class GetPasskeyActivity : AppCompatActivity() {
 
     @SuppressLint("RestrictedApi")
     private fun handleAssertion() {
+        if (isHandling) return
+        isHandling = true
         Log.d(TAG, "handleAssertion started, userVerification=$userVerification")
         lifecycleScope.launch {
             val credentialData = intent.getBundleExtra("CREDENTIAL_DATA")
@@ -281,7 +294,8 @@ class GetPasskeyActivity : AppCompatActivity() {
                     Log.d(TAG, "Manual biometrics result: $result")
                     if (result == null) {
                         Log.w(TAG, "Biometrics failed or was canceled")
-                        finish()
+                        setupUI() // Show UI as fallback
+                        isHandling = false
                         return@launch
                     }
                     result.cryptoObject?.cipher
@@ -458,14 +472,14 @@ class GetPasskeyActivity : AppCompatActivity() {
             ReactNativePasskeyAutofillModule.instance?.sendEvent("onPasskeyAuthenticated", Bundle().apply {
                 putBoolean("success", true)
             })
+            finish()
         } catch (e: Exception) {
             Log.e(TAG, "Error during passkey assertion", e)
-            setResult(Activity.RESULT_CANCELED)
+            setupUI() // Show UI on error
+            isHandling = false
         }
-        finish()
     }
-}
-
+    }
 
     private suspend fun biometrics(iv: String?): BiometricPrompt.AuthenticationResult? {
         return suspendCoroutine { continuation ->

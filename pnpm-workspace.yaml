@@ -1,6 +1,7 @@
 packages:
   - "."
   - "example"
+  - "e2e"
 minimumReleaseAgeExclude:
   - webpack
   - react

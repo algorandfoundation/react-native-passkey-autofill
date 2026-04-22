@@ -22,6 +22,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: cd example && npx expo prebuild
       - run: pnpm run lint
+      - run: pnpm run fmt:check
       - run: pnpm run build
       - run: pnpm test
       - run: pnpm run test:android

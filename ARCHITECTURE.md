@@ -63,7 +63,13 @@ The following methods are exposed to the JavaScript layer:
 - `getHdRootKeyId()`: Retrieves the current HD root key ID.
 - `configureIntentActions(getPasskeyAction: string, createPasskeyAction: string)`: Configures the intent actions used for Passkey flows.
 - `clearCredentials()`: Clears all stored credentials.
+- `isProviderActive()`: Returns `true` if this app is the user-selected system credential/autofill provider. Uses Android's `Settings.Secure("credential_service"[_primary])` (API 34+) and iOS's `ASCredentialIdentityStore.getState`. Useful both for gating passkey UI at runtime and for E2E tests, which need to confirm that an OS passkey prompt is served by _this_ provider rather than any other installed one.
+- `openProviderSettings()`: Deep-links the user to the OS credential/autofill provider settings so they can enable this app as the active provider. Resolves to `true` if a settings screen could be launched.
 
 ## Security Considerations
 
 As this module handles sensitive information (Passkeys), it is crucial to ensure that keys and secrets are handled securely in the native layers. Master keys should be stored in secure storage (like Android Keystore or iOS Keychain).
+
+## End-to-End Tests
+
+The `e2e/` workspace drives the `example/` app with Appium 2 + WebdriverIO, executed through Jest. The Android job uses the UiAutomator2 driver; the iOS job uses XCUITest. The happy-path spec mirrors the example and exercises passkey registration and assertion against `https://debug.liquidauth.com`. See [`e2e/README.md`](./e2e/README.md) for local usage and the [`E2E` workflow](./.github/workflows/e2e.yml) for CI.

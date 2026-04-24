@@ -214,7 +214,7 @@ const withPasskeyAutofill = (config, props = {}) => {
     // Dynamically find the path to the library's android/libs/repo directory
     const projectRoot = config.modRequest.projectRoot;
     const libraryRepoPath = path.join(__dirname, "android/libs/repo");
-    const relativeRepoPath = path.relative(projectRoot, libraryRepoPath);
+    const relativeRepoPath = path.relative(projectRoot, libraryRepoPath).replace(/\\/g, "/");
 
     // In Gradle, rootDir is the android directory of the app.
     // So the path to the repo relative to rootDir is ../<relativeRepoPath>

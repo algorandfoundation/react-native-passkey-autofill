@@ -1,5 +1,3 @@
-import { execFile, execFileSync } from "node:child_process";
-import path from "node:path";
 import { PLATFORM, ANDROID_PACKAGE } from "./capabilities";
 import type { Driver } from "./session";
 import { confirmSystemPrompt, byTestId } from "./selectors";

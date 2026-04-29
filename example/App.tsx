@@ -1,5 +1,5 @@
 import ReactNativePasskeyAutofill from "@algorandfoundation/react-native-passkey-autofill";
-import { Button, SafeAreaView, ScrollView, Text, View, StyleSheet } from "react-native";
+import { AppState, Button, SafeAreaView, ScrollView, Text, View, StyleSheet } from "react-native";
 import { useEffect, useState } from "react";
 import { Passkey } from "react-native-passkey";
 import { install } from "react-native-quick-crypto";
@@ -44,6 +44,33 @@ function AppContent() {
   const [account, setAccount] = useState<any>(null);
   const [xhdEd25519KeyId, setXhdEd25519KeyId] = useState<string | null>(null);
   const [activePasskeyId, setActivePasskeyId] = useState<string | null>(null);
+  const [providerActive, setProviderActive] = useState<boolean | null>(null);
+
+  const refreshProviderStatus = async () => {
+    try {
+      const active = await ReactNativePasskeyAutofill.isProviderActive();
+      setProviderActive(active);
+    } catch (e) {
+      console.warn("Failed to query provider status", e);
+      setProviderActive(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshProviderStatus();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshProviderStatus();
+    });
+    return () => sub.remove();
+  }, []);
+
+  const handleOpenProviderSettings = async () => {
+    try {
+      await ReactNativePasskeyAutofill.openProviderSettings();
+    } catch (e) {
+      alert("Failed to open provider settings: " + e);
+    }
+  };
 
   useEventListener(ReactNativePasskeyAutofill, "onPasskeyAdded", (event) => {
     console.log("onPasskeyAdded", event);
@@ -290,9 +317,39 @@ function AppContent() {
       <ScrollView style={styles.container}>
         <Text style={styles.header}>Passkey AutoFill Example</Text>
 
+        <Group name="Provider">
+          <View style={{ gap: 10 }}>
+            <Text
+              testID="provider-status"
+              style={styles.credText}
+              accessibilityLabel={
+                providerActive === null
+                  ? "provider-unknown"
+                  : providerActive
+                    ? "provider-active"
+                    : "provider-inactive"
+              }
+            >
+              Status: {providerActive === null ? "unknown" : providerActive ? "active" : "inactive"}
+            </Text>
+            {providerActive !== true && (
+              <Button
+                testID="open-provider-settings"
+                title="Enable Provider"
+                onPress={handleOpenProviderSettings}
+              />
+            )}
+          </View>
+        </Group>
+
         <Group name="Passkeys">
           <View style={{ gap: 10 }}>
-            <Button title="Clear Passkeys" onPress={handleClearCredentials} color="red" />
+            <Button
+              testID="clear-passkeys-button"
+              title="Clear Passkeys"
+              onPress={handleClearCredentials}
+              color="red"
+            />
           </View>
         </Group>
 
@@ -305,11 +362,13 @@ function AppContent() {
               <Text style={styles.credText}>Active Ed25519: {xhdEd25519KeyId}</Text>
             )}
             <Button
+              testID="passkey-action-button"
               title={passkeys.length > 0 ? "Use Passkey" : "Create Passkey"}
               onPress={handlePasskeyAction}
               disabled={!xhdEd25519KeyId}
             />
             <Button
+              testID="create-ed25519-key-button"
               title="Create XHD Ed25519 Key"
               onPress={handleCreateXHDEd25519Key}
               color="blue"

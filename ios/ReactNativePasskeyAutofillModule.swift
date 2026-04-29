@@ -1,4 +1,8 @@
 import ExpoModulesCore
+import AuthenticationServices
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public class ReactNativePasskeyAutofillModule: Module {
   // Each module class must implement the definition function. The definition consists of components
@@ -31,6 +35,27 @@ public class ReactNativePasskeyAutofillModule: Module {
 
     AsyncFunction("configureIntentActions") { (getPasskeyAction: String, createPasskeyAction: String) in
       // TODO: Implement for iOS
+    }
+
+    // Returns true when this app is the user-selected AutoFill credential
+    // provider. On iOS the Credential Provider extension reports its
+    // enablement via `ASCredentialIdentityStore.getState`.
+    AsyncFunction("isProviderActive") { (promise: Promise) in
+      ASCredentialIdentityStore.shared.getState { state in
+        promise.resolve(state.isEnabled)
+      }
+    }
+
+    // Best-effort deep link to the iOS AutoFill settings screen.
+    AsyncFunction("openProviderSettings") { () -> Bool in
+      #if canImport(UIKit)
+      if let url = URL(string: UIApplication.openSettingsURLString),
+         UIApplication.shared.canOpenURL(url) {
+        UIApplication.shared.open(url)
+        return true
+      }
+      #endif
+      return false
     }
 
     // Enables the module to be used as a native view. Definition components that are accepted as part of the

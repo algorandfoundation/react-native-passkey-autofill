@@ -60,6 +60,15 @@ interface CredentialRepository {
         const val KEYCHAIN_STORAGE_NAME = "PasskeyAutofillKeychain"
         const val PASSKEY_AUTOFILL_MMKV_ID = "passkey_autofill"
         const val HD_ROOT_KEY_ID_KEY = "hd_root_key_id"
+
+        /**
+         * JCE provider that exposes AndroidKeyStore-backed symmetric Cipher
+         * transformations (including AES/GCM). Pinning to this provider avoids
+         * BouncyCastle — which this module installs at position 1 — trying to
+         * extract raw bytes from a hardware-bound SecretKey and crashing with
+         * NullPointerException in `KeyParameter.<init>`.
+         */
+        const val ANDROID_KEYSTORE_CIPHER_PROVIDER = "AndroidKeyStoreBCWorkaround"
     }
 }
 
@@ -576,14 +585,40 @@ class Repository() : CredentialRepository {
         return keyStore.getKey(CredentialRepository.BIOMETRIC_KEY_ALIAS, null) as SecretKey
     }
 
+    /**
+     * Build an AES/GCM Cipher tied to the AndroidKeyStore-backed biometric key.
+     *
+     * We request the provider explicitly because this module installs
+     * BouncyCastle at position 1 (see [co.algorand.passkeyautofill.ReactNativePasskeyAutofillModule]).
+     * Without a pinned provider, [Cipher.getInstance] resolves to BouncyCastle, which
+     * then tries to extract raw key material from an AndroidKeyStore SecretKey
+     * (whose `getEncoded()` is null for hardware-bound keys) and crashes with:
+     *
+     *   java.lang.NullPointerException: Attempt to get length of null array
+     *       at org.bouncycastle.crypto.params.KeyParameter.<init>(...)
+     *
+     * AndroidKeyStore AES keys are served by the "AndroidKeyStoreBCWorkaround"
+     * JCE provider on all supported Android versions.
+     */
+    private fun newAndroidKeyStoreAesGcmCipher(): Cipher {
+        return try {
+            Cipher.getInstance("AES/GCM/NoPadding", CredentialRepository.ANDROID_KEYSTORE_CIPHER_PROVIDER)
+        } catch (e: NoSuchProviderException) {
+            // Extremely unlikely on stock Android, but fall back to provider discovery
+            // by key rather than by name so we never hand the key to BouncyCastle.
+            Log.w(CredentialRepository.TAG, "${CredentialRepository.ANDROID_KEYSTORE_CIPHER_PROVIDER} unavailable, falling back to default provider resolution", e)
+            Cipher.getInstance("AES/GCM/NoPadding")
+        }
+    }
+
     override fun getBiometricCipherForEncryption(): Cipher {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val cipher = newAndroidKeyStoreAesGcmCipher()
         cipher.init(Cipher.ENCRYPT_MODE, getBiometricSecretKey())
         return cipher
     }
 
     override fun getBiometricCipherForDecryption(iv: ByteArray): Cipher {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val cipher = newAndroidKeyStoreAesGcmCipher()
         cipher.init(Cipher.DECRYPT_MODE, getBiometricSecretKey(), GCMParameterSpec(128, iv))
         return cipher
     }

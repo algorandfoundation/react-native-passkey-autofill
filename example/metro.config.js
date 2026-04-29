@@ -24,7 +24,7 @@ config.resolver.extraNodeModules = {
   "node:crypto": path.resolve(__dirname, "node_modules", "react-native-quick-crypto"),
 };
 
-config.watchFolders = [path.resolve(__dirname, "..")];
+config.watchFolders = [...(config.watchFolders || []), path.resolve(__dirname, "..")];
 
 config.transformer.getTransformOptions = async () => ({
   transform: {

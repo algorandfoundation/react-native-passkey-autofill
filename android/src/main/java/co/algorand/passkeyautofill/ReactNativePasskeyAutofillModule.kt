@@ -3,8 +3,14 @@ package co.algorand.passkeyautofill
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import co.algorand.passkeyautofill.credentials.CredentialRepository
+import co.algorand.passkeyautofill.service.PasskeyAutofillCredentialProviderService
+import co.algorand.passkeyautofill.service.PasskeyAutofillCredentialProviderService.Companion.KEY_LAST_INVOKED_AT_MS
 import com.tencent.mmkv.MMKV
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.util.Log
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
@@ -80,5 +86,90 @@ class ReactNativePasskeyAutofillModule : Module() {
         credentialRepository.configureIntentActions(context, getPasskeyAction, createPasskeyAction)
       }
     }
+
+    AsyncFunction("isProviderActive") {
+      val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
+        ?: return@AsyncFunction false
+      isProviderEnabled(context)
+    }
+
+    AsyncFunction("openProviderSettings") {
+      val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
+        ?: return@AsyncFunction false
+      openCredentialProviderSettings(context)
+    }
+  }
+
+  /**
+   * Returns `true` when this app's [PasskeyAutofillCredentialProviderService]
+   * is registered as an active credential provider for the current user.
+   *
+   * Android stores the enabled credential providers as a colon-separated list
+   * of flattened [ComponentName]s in the `credential_service` and
+   * `credential_service_primary` Secure settings (API 34+). However those
+   * keys are `@hide` on Android 12+, so reading them from a regular app
+   * throws `SecurityException`. We therefore combine two signals:
+   *
+   *  1. Best-effort: try [Settings.Secure.getString]; if it returns the
+   *     expected component we know for sure we're the provider.
+   *  2. Fallback: inspect the MMKV timestamp written by the service itself
+   *     whenever the system routes a `BeginCreate/BeginGetCredentialRequest`
+   *     to it ([PasskeyAutofillCredentialProviderService.KEY_LAST_INVOKED_AT_MS]).
+   *     The Credential Manager only routes requests to *enabled* providers,
+   *     so a non-zero stamp is proof that we were selected at least once.
+   */
+  private fun isProviderEnabled(context: Context): Boolean {
+    val expected = ComponentName(
+      context.packageName,
+      PasskeyAutofillCredentialProviderService::class.java.name,
+    ).flattenToString()
+    val resolver = context.contentResolver
+    val keys = arrayOf("credential_service", "credential_service_primary")
+    for (key in keys) {
+      val value = try {
+        Settings.Secure.getString(resolver, key)
+      } catch (e: SecurityException) {
+        // `credential_service[_primary]` are @hide on Android 12+; fall
+        // through to the MMKV stamp check below.
+        Log.d("ReactNativePasskeyAutofill", "Secure key $key not readable: ${e.message}")
+        null
+      } ?: continue
+      if (value.isEmpty()) continue
+      val enabled = value.split(':').any { it.equals(expected, ignoreCase = true) } ||
+        value.contains(expected, ignoreCase = true)
+      if (enabled) return true
+    }
+    // Fallback: look for a timestamp written by our CredentialProviderService.
+    return try {
+      MMKV.initialize(context)
+      (MMKV.defaultMMKV()?.decodeLong(KEY_LAST_INVOKED_AT_MS, 0L) ?: 0L) > 0L
+    } catch (e: Exception) {
+      Log.w("ReactNativePasskeyAutofill", "Failed to read provider stamp: ${e.message}")
+      false
+    }
+  }
+
+  /**
+   * Best-effort deep link into the user's credential-provider preferences so
+   * they can toggle our service on. Falls back to the app-details page when
+   * the credential provider screen is not available on the device.
+   */
+  private fun openCredentialProviderSettings(context: Context): Boolean {
+    val intents = listOf(
+      Intent("android.settings.CREDENTIAL_PROVIDER"),
+      Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = Uri.fromParts("package", context.packageName, null)
+      },
+    )
+    for (intent in intents) {
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      try {
+        context.startActivity(intent)
+        return true
+      } catch (e: Exception) {
+        Log.w("ReactNativePasskeyAutofill", "Failed to open ${intent.action}: ${e.message}")
+      }
+    }
+    return false
   }
 }

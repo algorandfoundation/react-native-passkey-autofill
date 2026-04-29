@@ -5,6 +5,8 @@ pre-commit:
   commands:
     lint:
       run: pnpm run lint
+    fmt:
+      run: pnpm run fmt
 pre-push:
   parallel: true
   commands:

@@ -1,0 +1,11 @@
+{
+  "name": "@algorandfoundation/react-native-passkey-autofill-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Appium + WebdriverIO + Jest end-to-end tests for the Passkey AutoFill example app.",
+  "scripts": {
+    "test": "node --experimental-vm-modules ../node_modules/jest/bin/jest.js --config jest.config.ts",
+    "test:android": "E2E_PLATFORM=android node --experimental-vm-modules ../node_modules/jest/bin/jest.js --config jest.config.ts",
+    "test:ios": "E2E_PLATFORM=ios node --experimental-vm-modules ../node_modules/jest/bin/jest.js --config jest.config.ts"
+  }
+}

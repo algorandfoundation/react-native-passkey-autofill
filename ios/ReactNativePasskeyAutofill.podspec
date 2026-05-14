@@ -19,11 +19,20 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
+  s.dependency 'MMKVCore'
 
-  # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
   }
 
-  s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"
+  s.source_files = [
+    "*.{h,m,mm,swift,hpp,cpp}",
+    "AutofillCredentialProvider/PasskeyAutofillCredentialProvider-Bridging-Header.h",
+    "AutofillCredentialProvider/PasskeyCredentialStore.swift",
+    "AutofillCredentialProvider/PasskeyKeystoreMMKV.h",
+    "AutofillCredentialProvider/PasskeyKeystoreMMKV.mm"
+  ]
+  s.public_header_files = [
+    "AutofillCredentialProvider/PasskeyKeystoreMMKV.h"
+  ]
 end

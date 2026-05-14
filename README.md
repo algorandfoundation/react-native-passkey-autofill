@@ -45,6 +45,54 @@ If you are using Expo, you can configure the plugin in your `app.json` or `app.c
 - `site`: The URL of your FIDO server (default: `https://debug.liquidauth.com`).
 - `label`: The name of the credential provider as it appears in Android settings (default: `My Credential Provider`).
 
+### Configure for iOS
+
+iOS passkey AutoFill requires a Credential Provider extension, an App Group shared between the app and extension, and an associated domain for Web Credentials. The Expo config plugin can create and wire the extension during prebuild:
+
+```json
+{
+  "expo": {
+    "ios": {
+      "bundleIdentifier": "com.example.wallet",
+      "associatedDomains": ["webcredentials:your-fido-server.com"],
+      "entitlements": {
+        "com.apple.developer.authentication-services.autofill-credential-provider": true
+      }
+    },
+    "plugins": [
+      [
+        "@algorandfoundation/react-native-passkey-autofill",
+        {
+          "site": "https://your-fido-server.com",
+          "label": "My Custom Credential Provider",
+          "appGroup": "group.com.example.wallet.passkey-autofill",
+          "appleTeamId": "YOUR_TEAM_ID"
+        }
+      ]
+    ]
+  }
+}
+```
+
+For iOS integration, make sure that:
+
+- The app and Credential Provider extension both have the AutoFill Credential Provider capability.
+- The app and extension both have the same App Group entitlement.
+- The app has a `webcredentials:<domain>` associated domain, and that domain serves a valid `apple-app-site-association` file for the app identifier.
+- The deployment target is iOS 17 or newer for passkey credential provider support.
+- The generated extension target can link `AuthenticationServices.framework`, `CryptoKit.framework`, `MMKVCore`, and the deterministic P-256 Swift package.
+- `NSFaceIDUsageDescription` is present when biometric authentication is used.
+
+At runtime, the app must provide the native side with key material and keep the iOS identity store in sync:
+
+```typescript
+await ReactNativePasskeyAutofill.setDerivedMainKey(derivedMainKeyHex);
+await ReactNativePasskeyAutofill.setHdRootKeyId(hdRootKeyId);
+await ReactNativePasskeyAutofill.refreshCredentialIdentities();
+```
+
+Call `refreshCredentialIdentities()` after creating, importing, deleting, or restoring passkeys so iOS AutoFill sees the current credentials.
+
 ## Usage
 
 ```typescript

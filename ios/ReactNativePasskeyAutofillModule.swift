@@ -17,24 +17,154 @@ public class ReactNativePasskeyAutofillModule: Module {
     Events("onPasskeyAdded", "onPasskeyAuthenticated")
 
     AsyncFunction("setMasterKey") { (secret: String) in
-      // TODO: Implement for iOS
+      guard let store = PasskeyCredentialStore() else {
+        throw NSError(
+          domain: "ReactNativePasskeyAutofill",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "App Group is not configured for passkey autofill."]
+        )
+      }
+      store.saveMasterKey(secret)
+    }
+
+    AsyncFunction("setDerivedMainKey") { (secret: String) in
+      guard let store = PasskeyCredentialStore() else {
+        throw NSError(
+          domain: "ReactNativePasskeyAutofill",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "App Group is not configured for passkey autofill."]
+        )
+      }
+      store.saveDerivedMainKey(secret)
     }
 
     AsyncFunction("setHdRootKeyId") { (id: String) in
-      // TODO: Implement for iOS
+      guard let store = PasskeyCredentialStore() else {
+        throw NSError(
+          domain: "ReactNativePasskeyAutofill",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "App Group is not configured for passkey autofill."]
+        )
+      }
+      store.saveHdRootKeyId(id)
     }
 
     AsyncFunction("getHdRootKeyId") { () -> String? in
-      // TODO: Implement for iOS
-      return nil
+      guard let store = PasskeyCredentialStore() else {
+        return nil
+      }
+      return store.hdRootKeyId()
     }
 
     AsyncFunction("clearCredentials") {
-      // TODO: Implement for iOS
+      guard let store = PasskeyCredentialStore() else {
+        return
+      }
+      store.clear()
+      try await store.removeAllIdentities()
+    }
+
+    AsyncFunction("deleteCredential") { (credentialId: String) in
+      guard let store = PasskeyCredentialStore() else {
+        return
+      }
+      try store.removeCredential(id: credentialId)
+      try await store.replaceIdentityStore()
     }
 
     AsyncFunction("configureIntentActions") { (getPasskeyAction: String, createPasskeyAction: String) in
-      // TODO: Implement for iOS
+      guard let store = PasskeyCredentialStore() else {
+        return
+      }
+      store.configureIntentActions(
+        getPasskeyAction: getPasskeyAction,
+        createPasskeyAction: createPasskeyAction
+      )
+    }
+
+    AsyncFunction("replaceCredentialIdentities") { (credentials: [[String: Any]]) in
+      guard let store = PasskeyCredentialStore() else {
+        throw NSError(
+          domain: "ReactNativePasskeyAutofill",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "App Group is not configured for passkey autofill."]
+        )
+      }
+
+      let storedCredentials = credentials.compactMap { credential -> StoredPasskeyCredential? in
+        guard let credentialId = credential["credentialId"] as? String ?? credential["id"] as? String,
+              let relyingPartyIdentifier =
+                credential["relyingPartyIdentifier"] as? String ??
+                credential["rpId"] as? String ??
+                credential["origin"] as? String,
+              let userName =
+                credential["userName"] as? String ??
+                credential["name"] as? String ??
+                credential["userHandle"] as? String,
+              let userHandle =
+                credential["userHandle"] as? String ??
+                credential["userId"] as? String,
+              let privateKey =
+                credential["privateKey"] as? String ??
+                credential["privateKeyBase64"] as? String
+        else {
+          return nil
+        }
+
+        return StoredPasskeyCredential(
+          credentialId: credentialId,
+          relyingPartyIdentifier: relyingPartyIdentifier.relyingPartyIdentifier,
+          userName: userName,
+          userHandle: userHandle,
+          privateKey: privateKey,
+          publicKey: credential["publicKey"] as? String ?? credential["publicKeyBase64"] as? String,
+          createdAt: credential["createdAt"] as? Double ?? Date().timeIntervalSince1970
+        )
+      }
+
+      try store.replace(storedCredentials)
+      try await store.replaceIdentityStore()
+    }
+
+    AsyncFunction("refreshCredentialIdentities") {
+      guard let store = PasskeyCredentialStore() else {
+        throw NSError(
+          domain: "ReactNativePasskeyAutofill",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "App Group is not configured for passkey autofill."]
+        )
+      }
+
+      try await store.replaceIdentityStore()
+    }
+
+    AsyncFunction("getStoredCredentials") { () -> [[String: Any]] in
+      guard let store = PasskeyCredentialStore() else {
+        return []
+      }
+
+      return store.allCredentials().map { credential in
+        var result: [String: Any] = [
+          "credentialId": credential.credentialId,
+          "relyingPartyIdentifier": credential.relyingPartyIdentifier,
+          "userName": credential.userName,
+          "userHandle": credential.userHandle,
+          "createdAt": credential.createdAt,
+        ]
+
+        if let publicKey = credential.publicKey {
+          result["publicKey"] = publicKey
+        }
+
+        return result
+      }
+    }
+
+    AsyncFunction("getDiagnostics") { () -> [String] in
+      guard let store = PasskeyCredentialStore() else {
+        return []
+      }
+      return store.diagnostics()
     }
 
     // Returns true when this app is the user-selected AutoFill credential

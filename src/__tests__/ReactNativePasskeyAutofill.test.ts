@@ -1,9 +1,14 @@
 const mockModule = {
   setMasterKey: jest.fn(),
+  setDerivedMainKey: jest.fn(),
   setHdRootKeyId: jest.fn(),
   getHdRootKeyId: jest.fn(),
   configureIntentActions: jest.fn(),
   clearCredentials: jest.fn(),
+  replaceCredentialIdentities: jest.fn(),
+  refreshCredentialIdentities: jest.fn(),
+  isProviderActive: jest.fn(),
+  openProviderSettings: jest.fn(),
 };
 
 jest.mock("expo", () => ({

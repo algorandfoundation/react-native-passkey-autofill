@@ -80,6 +80,12 @@ class ReactNativePasskeyAutofillModule : Module() {
       credentialRepository.clearCredentials(context)
     }
 
+    AsyncFunction("deleteCredential") { credentialId: String ->
+      val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
+        ?: return@AsyncFunction Unit
+      credentialRepository.deleteCredential(context, credentialId)
+    }
+
     AsyncFunction("configureIntentActions") { getPasskeyAction: String, createPasskeyAction: String ->
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
       if (context != null) {

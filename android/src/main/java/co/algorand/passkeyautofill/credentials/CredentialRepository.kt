@@ -45,6 +45,7 @@ interface CredentialRepository {
     fun getCreatePasskeyAction(context: Context): String?
     fun getGetPasskeyAction(context: Context): String?
     fun clearCredentials(context: Context)
+    fun deleteCredential(context: Context, credentialId: String)
     
     fun getBiometricCipherForEncryption(): Cipher
     fun getBiometricCipherForDecryption(iv: ByteArray): Cipher
@@ -262,6 +263,19 @@ class Repository() : CredentialRepository {
                 keyPairGen.initialize(ecGenSpec)
                 val paramSpec = (keyPairGen.generateKeyPair().public as java.security.interfaces.ECPublicKey).params
                 val factory = KeyFactory.getInstance("EC")
+
+                val publicKeyFromX509 = try {
+                    factory.generatePublic(X509EncodedKeySpec(publicKeyBytes))
+                } catch (_: Exception) {
+                    null
+                }
+
+                if (publicKeyFromX509 != null && privateKeyBytes.size == 32) {
+                    val s = java.math.BigInteger(1, privateKeyBytes)
+                    val privSpec = ECPrivateKeySpec(s, paramSpec)
+                    val privateKey = factory.generatePrivate(privSpec)
+                    return KeyPair(publicKeyFromX509, privateKey)
+                }
 
                 // privateKey is 32-byte scalar
                 val rawXY: Pair<ByteArray, ByteArray>? = when {
@@ -541,6 +555,36 @@ class Repository() : CredentialRepository {
         } catch (e: Exception) {
             Log.e(CredentialRepository.TAG, "Error clearing credentials and secrets", e)
         }
+    }
+
+    override fun deleteCredential(context: Context, credentialId: String) {
+        try {
+            val mmkvPasskeys = getPasskeysMMKV(context)
+            for (candidateId in credentialIdCandidates(credentialId)) {
+                mmkvPasskeys.removeValueForKey(candidateId)
+            }
+        } catch (e: Exception) {
+            Log.e(CredentialRepository.TAG, "Error deleting credential", e)
+        }
+    }
+
+    private fun credentialIdCandidates(id: String): Set<String> {
+        val candidates = mutableSetOf(id)
+        val decoded = try {
+            AndroidBase64.decode(id, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
+        } catch (_: Exception) {
+            try {
+                AndroidBase64.decode(id, AndroidBase64.DEFAULT)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        if (decoded != null) {
+            candidates.add(AndroidBase64.encodeToString(decoded, AndroidBase64.DEFAULT).trim())
+            candidates.add(AndroidBase64.encodeToString(decoded, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING))
+        }
+        return candidates
     }
 
     private fun hexToBytes(hex: String): ByteArray {

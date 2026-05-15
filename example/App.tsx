@@ -59,7 +59,10 @@ function AppContent() {
   useEffect(() => {
     refreshProviderStatus();
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") refreshProviderStatus();
+      if (state === "active") {
+        refreshProviderStatus();
+        bootstrap().catch(console.error);
+      }
     });
     return () => sub.remove();
   }, []);
@@ -262,8 +265,7 @@ function AppContent() {
       const submitResult = await submitResponse.json();
       if (submitResult.error) throw new Error(submitResult.error);
 
-      // Re-bootstrap to ensure the new passkey is available for autofill
-      //await bootstrap();
+      await bootstrap();
 
       alert("Passkey created and submitted successfully!");
     } catch (e) {

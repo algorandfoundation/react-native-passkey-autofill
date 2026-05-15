@@ -9,7 +9,11 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   private let store = PasskeyCredentialStore()
   private var pendingRegistrationRequest: ASPasskeyCredentialRequest?
   private var pendingRegistrationIdentity: ASPasskeyCredentialIdentity?
+  private var pendingAssertionCredential: StoredPasskeyCredential?
+  private var pendingAssertionClientDataHash: Data?
+  private var pendingAssertionRelyingPartyIdentifier: String?
   private var isCompletingRegistration = false
+  private var isCompletingAssertion = false
   private var hasPresentedInterface = false
   private var authContext: LAContext?
   private let activityIndicator = UIActivityIndicatorView(style: .large)
@@ -24,12 +28,15 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     super.viewDidAppear(animated)
     hasPresentedInterface = true
 
-    guard pendingRegistrationRequest != nil else {
-      return
-    }
-
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-      self?.authenticateAndCompleteRegistration()
+      guard let self else {
+        return
+      }
+      if self.pendingRegistrationRequest != nil {
+        self.authenticateAndCompleteRegistration()
+      } else if self.pendingAssertionCredential != nil {
+        self.authenticateAndCompleteAssertion()
+      }
     }
   }
 
@@ -43,15 +50,16 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
 
     let relyingPartyIdentifier = requestParameters.relyingPartyIdentifier
+    let allowedCredentials = Set(requestParameters.allowedCredentials.map { $0.base64URLEncodedString() })
     guard let credential = store?.credentials(
             relyingPartyIdentifier: relyingPartyIdentifier
-          ).first
+          ).first(where: { allowedCredentials.isEmpty || allowedCredentials.contains($0.credentialIdData.base64URLEncodedString()) })
     else {
       cancel(code: .credentialIdentityNotFound, message: "No passkey is available.")
       return
     }
 
-    completeAssertion(
+    prepareAssertion(
       credential: credential,
       clientDataHash: requestParameters.clientDataHash,
       relyingPartyIdentifier: relyingPartyIdentifier
@@ -66,6 +74,22 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       return
     }
 
+    guard request.credentialIdentity is ASPasskeyCredentialIdentity else {
+      cancel(code: .credentialIdentityNotFound, message: "Credential identity not found.")
+      return
+    }
+
+    cancel(code: .userInteractionRequired, message: "User verification is required.")
+  }
+
+  override func prepareInterfaceToProvideCredential(for credentialRequest: ASCredentialRequest) {
+    guard #available(iOSApplicationExtension 17.0, *),
+          let request = credentialRequest as? ASPasskeyCredentialRequest
+    else {
+      cancel(code: .failed, message: "Unsupported credential request.")
+      return
+    }
+
     guard let identity = request.credentialIdentity as? ASPasskeyCredentialIdentity,
           let credential = store?.credential(id: identity.credentialID)
     else {
@@ -73,15 +97,11 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       return
     }
 
-    completeAssertion(
+    prepareAssertion(
       credential: credential,
       clientDataHash: request.clientDataHash,
       relyingPartyIdentifier: identity.relyingPartyIdentifier
     )
-  }
-
-  override func prepareInterfaceToProvideCredential(for credentialRequest: ASCredentialRequest) {
-    provideCredentialWithoutUserInteraction(for: credentialRequest)
   }
 
   override func prepareInterface(forPasskeyRegistration request: ASCredentialRequest) {
@@ -122,18 +142,17 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
 
     do {
-      guard let derivedMainKey = store?.derivedMainKey(),
-            store?.isMasterKeyAvailable() == true,
-            store?.hdRootKeyId() != nil
-      else {
-        store?.appendDiagnostic("missing wallet root-key state")
+      guard let store else {
+        self.store?.appendDiagnostic("missing wallet root-key state")
         showFailure("Wallet root key is not available. Open Rocca Wallet once, unlock it, then try again.")
         return
       }
 
+      let parentKeyId = store.hdRootKeyId()
+      let derivedParentSecret = try store.hdRootKeySecret()
       let userHandle = identity.userHandleString
       let privateKey = try Self.domainSpecificKeyPair(
-        derivedMainKey: derivedMainKey,
+        derivedParentSecret: derivedParentSecret,
         origin: identity.relyingPartyIdentifier,
         userHandle: userHandle.lowercased()
       )
@@ -146,31 +165,9 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         userHandle: identity.userHandle.base64EncodedString(),
         privateKey: privateKey.rawRepresentation.base64EncodedString(),
         publicKey: publicKey.base64EncodedString(),
-        createdAt: Date().timeIntervalSince1970
+        createdAt: Date().timeIntervalSince1970,
+        parentKeyId: parentKeyId
       )
-
-      if #available(iOSApplicationExtension 18.0, *) {
-        if request.excludedCredentials?.contains(where: { $0.credentialID == credentialId }) == true {
-          store?.appendDiagnostic("registration excluded credential matched generated credential id")
-          if store?.isCredentialDeleted(id: credentialId) == true {
-            store?.appendDiagnostic("excluded credential was deleted locally; not recovering")
-            showFailure("This passkey was deleted from Rocca Wallet. Remove it from this website before creating it again.")
-            return
-          }
-          try store?.save(storedCredential)
-          store?.appendDiagnostic("stored existing excluded passkey credential")
-          Task {
-            do {
-              try await store?.replaceIdentityStore()
-              store?.appendDiagnostic("replaceIdentityStore after excluded registration succeeded")
-            } catch {
-              store?.appendDiagnostic("replaceIdentityStore after excluded registration failed: \(error.localizedDescription)")
-            }
-          }
-          showFailure("A passkey already exists for this account.")
-          return
-        }
-      }
 
       let authData = try WebAuthn.authenticatorDataForAttestation(
         relyingPartyIdentifier: identity.relyingPartyIdentifier,
@@ -184,19 +181,19 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         attestationObject: WebAuthn.attestationObject(authenticatorData: authData)
       )
 
-      try store?.save(storedCredential)
-      store?.appendDiagnostic("stored passkey credential")
+      try store.save(storedCredential)
+      store.appendDiagnostic("stored passkey credential")
 
       Task {
         do {
-          try await store?.replaceIdentityStore()
-          store?.appendDiagnostic("replaceIdentityStore after registration succeeded")
+          try await store.replaceIdentityStore()
+          store.appendDiagnostic("replaceIdentityStore after registration succeeded")
         } catch {
-          store?.appendDiagnostic("replaceIdentityStore after registration failed: \(error.localizedDescription)")
+          store.appendDiagnostic("replaceIdentityStore after registration failed: \(error.localizedDescription)")
         }
       }
 
-      store?.appendDiagnostic("completeRegistrationRequest")
+      store.appendDiagnostic("completeRegistrationRequest")
       extensionContext.completeRegistrationRequest(using: registrationCredential) { [weak self] completed in
         self?.store?.appendDiagnostic("completeRegistrationRequest completion: \(completed)")
         self?.authContext = nil
@@ -225,11 +222,95 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         authenticatorData: authenticatorData,
         credentialID: credential.credentialIdData
       )
-      extensionContext.completeAssertionRequest(using: assertionCredential) { _ in }
+      extensionContext.completeAssertionRequest(using: assertionCredential) { [weak self] _ in
+        self?.authContext = nil
+        self?.isCompletingAssertion = false
+        self?.pendingAssertionCredential = nil
+        self?.pendingAssertionClientDataHash = nil
+        self?.pendingAssertionRelyingPartyIdentifier = nil
+      }
     } catch {
+      isCompletingAssertion = false
       cancel(code: .failed, message: error.localizedDescription)
     }
   }
+
+  private func prepareAssertion(
+    credential: StoredPasskeyCredential,
+    clientDataHash: Data,
+    relyingPartyIdentifier: String
+  ) {
+    pendingAssertionCredential = credential
+    pendingAssertionClientDataHash = clientDataHash
+    pendingAssertionRelyingPartyIdentifier = relyingPartyIdentifier
+    showCheckingPasskeys()
+
+    if hasPresentedInterface {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        self?.authenticateAndCompleteAssertion()
+      }
+    }
+  }
+
+  private func authenticateAndCompleteAssertion() {
+    guard !isCompletingAssertion else {
+      return
+    }
+    isCompletingAssertion = true
+
+    guard let credential = pendingAssertionCredential,
+          let clientDataHash = pendingAssertionClientDataHash,
+          let relyingPartyIdentifier = pendingAssertionRelyingPartyIdentifier
+    else {
+      isCompletingAssertion = false
+      cancel(code: .credentialIdentityNotFound, message: "Credential identity not found.")
+      return
+    }
+
+    let context = LAContext()
+    authContext = context
+    context.localizedCancelTitle = "Cancel"
+    context.localizedFallbackTitle = ""
+
+    let policy: LAPolicy = .deviceOwnerAuthentication
+
+    var error: NSError?
+    guard context.canEvaluatePolicy(policy, error: &error) else {
+      authContext = nil
+      isCompletingAssertion = false
+      showFailure(error?.localizedDescription ?? "Device authentication is not available.")
+      return
+    }
+
+    store?.appendDiagnostic("evaluatePolicy assertion start")
+    context.evaluatePolicy(policy, localizedReason: "Use passkeys with Rocca Wallet") { [weak self] success, authenticationError in
+      DispatchQueue.main.async {
+        guard let self else {
+          return
+        }
+
+        if success {
+          self.store?.appendDiagnostic("evaluatePolicy assertion success")
+          self.completeAssertion(
+            credential: credential,
+            clientDataHash: clientDataHash,
+            relyingPartyIdentifier: relyingPartyIdentifier
+          )
+        } else {
+          self.authContext = nil
+          self.isCompletingAssertion = false
+          self.store?.appendDiagnostic(
+            "evaluatePolicy assertion failed: \(authenticationError?.localizedDescription ?? "unknown")"
+          )
+          self.cancel(
+            code: .userCanceled,
+            message: authenticationError?.localizedDescription ?? "Biometric authentication was canceled."
+          )
+        }
+      }
+    }
+  }
+
   private func cancel(code: ASExtensionError.Code, message: String) {
     store?.appendDiagnostic("cancel: \(message)")
     extensionContext.cancelRequest(
@@ -324,13 +405,13 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   }
 
   private static func domainSpecificKeyPair(
-    derivedMainKey: Data,
+    derivedParentSecret: Data,
     origin: String,
     userHandle: String,
     counter: UInt32 = 0
   ) throws -> P256.Signing.PrivateKey {
     var input = Data()
-    input.append(derivedMainKey)
+    input.append(derivedParentSecret)
     input.append(contentsOf: origin.utf8)
     input.append(contentsOf: userHandle.utf8)
 

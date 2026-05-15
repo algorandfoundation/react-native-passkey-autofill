@@ -9,6 +9,7 @@ import {
 } from "@algorandfoundation/keystore";
 import { fetchSecret, getMasterKey, storage } from "@algorandfoundation/react-native-keystore";
 import { keyStore } from "./stores/keystore";
+import { passkeysStore } from "./stores/passkeys";
 
 /**
  * This is required when a key is modified outside of our control
@@ -64,8 +65,43 @@ export async function bootstrap() {
     await ReactNativePasskeyAutofill.setHdRootKeyId(hdRootKey.id);
   }
 
+  await ReactNativePasskeyAutofill.refreshCredentialIdentities();
+  await syncNativePasskeys();
+
   ReactNativePasskeyAutofill.configureIntentActions(
     "co.algorand.passkeyautofill.GET_PASSKEY",
     "co.algorand.passkeyautofill.CREATE_PASSKEY",
   ).catch(console.error);
+}
+
+async function syncNativePasskeys() {
+  const credentials = await ReactNativePasskeyAutofill.getStoredCredentials();
+  passkeysStore.setState((state) => {
+    const existingById = new Map(state.passkeys.map((passkey) => [passkey.id, passkey]));
+    for (const credential of credentials) {
+      const id = credential.credentialId;
+      const publicKey = credential.publicKey ?? credential.publicKeyBase64;
+      if (!id || !publicKey) continue;
+
+      existingById.set(id, {
+        id,
+        name: credential.userName ?? credential.relyingPartyIdentifier ?? "Unnamed Passkey",
+        publicKey: base64ToBytes(publicKey),
+        algorithm: "ES256",
+        metadata: {
+          origin: credential.relyingPartyIdentifier,
+          userHandle: credential.userHandle,
+          parentKeyId: credential.parentKeyId,
+        },
+      });
+    }
+    return {
+      ...state,
+      passkeys: Array.from(existingById.values()),
+    };
+  });
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  return Uint8Array.from(Buffer.from(value.replace(/-/g, "+").replace(/_/g, "/"), "base64"));
 }

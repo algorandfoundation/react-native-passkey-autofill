@@ -83,10 +83,10 @@ For iOS integration, make sure that:
 - The generated extension target can link `AuthenticationServices.framework`, `CryptoKit.framework`, `MMKVCore`, and the deterministic P-256 Swift package.
 - `NSFaceIDUsageDescription` is present when biometric authentication is used.
 
-At runtime, the app must provide the native side with key material and keep the iOS identity store in sync:
+At runtime, the app must provide the native side with the master key, identify the HD root key stored in MMKV, and keep the iOS identity store in sync:
 
 ```typescript
-await ReactNativePasskeyAutofill.setDerivedMainKey(derivedMainKeyHex);
+await ReactNativePasskeyAutofill.setMasterKey(masterKeyHex);
 await ReactNativePasskeyAutofill.setHdRootKeyId(hdRootKeyId);
 await ReactNativePasskeyAutofill.refreshCredentialIdentities();
 ```

@@ -8,6 +8,7 @@ enum PasskeyCredentialStoreError: Error {
   case credentialNotFound
   case credentialEncodingFailed
   case credentialStorageFailed
+  case hdRootKeyUnavailable
   case invalidPrivateKey
   case signingFailed
 }
@@ -20,6 +21,7 @@ struct StoredPasskeyCredential: Codable {
   let privateKey: String
   let publicKey: String?
   let createdAt: Double
+  let parentKeyId: String?
 }
 
 final class PasskeyCredentialStore {
@@ -27,7 +29,6 @@ final class PasskeyCredentialStore {
   static let legacyCredentialKey = "ReactNativePasskeyAutofillCredentials"
   static let defaultCredentialKey = "ReactNativePasskeyAutofillCredentialsV2"
   static let defaultMasterKeyKey = "ReactNativePasskeyAutofillMasterKey"
-  static let defaultDerivedMainKeyKey = "ReactNativePasskeyAutofillDerivedMainKey"
   static let defaultHdRootKeyIdKey = "ReactNativePasskeyAutofillHdRootKeyId"
   static let defaultGetPasskeyActionKey = "ReactNativePasskeyAutofillGetPasskeyAction"
   static let defaultCreatePasskeyActionKey = "ReactNativePasskeyAutofillCreatePasskeyAction"
@@ -142,6 +143,7 @@ final class PasskeyCredentialStore {
       let metadata = keyData["metadata"] as? [String: Any]
       let origin = metadata?["origin"] as? String ?? keyData["origin"] as? String ?? ""
       let userHandle = metadata?["userHandle"] as? String ?? keyData["userHandle"] as? String ?? ""
+      let parentKeyId = metadata?["parentKeyId"] as? String ?? keyData["parentKeyId"] as? String
       guard !origin.isEmpty, !userHandle.isEmpty else {
         appendDiagnostic("skipping keystore credential missing metadata: \(id)")
         return nil
@@ -155,7 +157,8 @@ final class PasskeyCredentialStore {
         userHandle: userHandle,
         privateKey: privateKey.base64EncodedString(),
         publicKey: publicKey.base64EncodedString(),
-        createdAt: metadata?["createdAt"] as? Double ?? Date().timeIntervalSince1970
+        createdAt: metadata?["createdAt"] as? Double ?? Date().timeIntervalSince1970,
+        parentKeyId: parentKeyId
       )
     }
   }
@@ -174,6 +177,19 @@ final class PasskeyCredentialStore {
       throw PasskeyCredentialStoreError.invalidPrivateKey
     }
 
+    var metadata: [String: Any] = [
+      "origin": credential.relyingPartyIdentifier,
+      "userName": credential.userName.passkeyDisplayName,
+      "userHandle": credential.userHandle,
+      "userId": credential.userHandle,
+      "count": 0,
+      "createdAt": credential.createdAt,
+      "registered": true,
+    ]
+    if let parentKeyId = credential.parentKeyId ?? hdRootKeyId() {
+      metadata["parentKeyId"] = parentKeyId
+    }
+
     let keyData: [String: Any] = [
       "id": credential.credentialId,
       "type": "hd-derived-p256",
@@ -183,15 +199,7 @@ final class PasskeyCredentialStore {
       "name": "Passkey: \(credential.relyingPartyIdentifier)",
       "privateKey": privateKey.byteArray,
       "publicKey": publicKey.byteArray,
-      "metadata": [
-        "origin": credential.relyingPartyIdentifier,
-        "userName": credential.userName.passkeyDisplayName,
-        "userHandle": credential.userHandle,
-        "userId": credential.userHandle,
-        "count": 0,
-        "createdAt": credential.createdAt,
-        "registered": true,
-      ],
+      "metadata": metadata,
     ]
 
     let encoded = try encodeKeyData(keyData)
@@ -209,7 +217,6 @@ final class PasskeyCredentialStore {
     defaults.removeObject(forKey: Self.legacyCredentialKey)
     defaults.removeObject(forKey: Self.defaultDeletedCredentialIdsKey)
     defaults.removeObject(forKey: Self.defaultMasterKeyKey)
-    defaults.removeObject(forKey: Self.defaultDerivedMainKeyKey)
     defaults.removeObject(forKey: Self.defaultHdRootKeyIdKey)
     defaults.removeObject(forKey: Self.defaultGetPasskeyActionKey)
     defaults.removeObject(forKey: Self.defaultCreatePasskeyActionKey)
@@ -230,23 +237,33 @@ final class PasskeyCredentialStore {
     masterKey() != nil
   }
 
-  func saveDerivedMainKey(_ secret: String) {
-    defaults.set(Self.normalizeSecret(secret).base64URLEncodedString(), forKey: Self.defaultDerivedMainKeyKey)
-  }
-
-  func derivedMainKey() -> Data? {
-    guard let secret = defaults.string(forKey: Self.defaultDerivedMainKeyKey) else {
-      return nil
-    }
-    return Data(base64URLEncoded: secret) ?? Data(base64Encoded: secret)
-  }
-
   func saveHdRootKeyId(_ id: String) {
     defaults.set(id, forKey: Self.defaultHdRootKeyIdKey)
   }
 
   func hdRootKeyId() -> String? {
     defaults.string(forKey: Self.defaultHdRootKeyIdKey)
+  }
+
+  func hdRootKeySecret() throws -> Data {
+    guard let masterKey = masterKey(),
+          let hdRootKeyId = hdRootKeyId(),
+          let appGroup = Bundle.main.object(forInfoDictionaryKey: Self.defaultSuiteNameKey) as? String,
+          let payload = try? PasskeyKeystoreMMKV.string(forKey: hdRootKeyId, appGroup: appGroup)
+    else {
+      throw PasskeyCredentialStoreError.hdRootKeyUnavailable
+    }
+
+    let keyData = try decodeKeystorePayload(payload, masterKey: masterKey)
+    if let seed = dataArray(keyData["seed"]) ?? dataArray(keyData["privateKey"]) {
+      return seed
+    }
+    if let seed = keyData["seed"] as? String ?? keyData["privateKey"] as? String,
+       let data = Self.secretStringData(seed)
+    {
+      return data
+    }
+    throw PasskeyCredentialStoreError.hdRootKeyUnavailable
   }
 
   func configureIntentActions(getPasskeyAction: String, createPasskeyAction: String) {
@@ -361,8 +378,17 @@ final class PasskeyCredentialStore {
   }
 
   private func decodeKeystorePayload(_ payload: String, masterKey: Data) throws -> [String: Any] {
-    let encoded = try decryptData(masterKey, payload)
-    guard let jsonData = Data(base64URLEncoded: encoded),
+    let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.hasPrefix("{"),
+       let payloadData = trimmed.data(using: .utf8),
+       let json = try JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+       json["iv"] == nil || json["tag"] == nil || json["content"] == nil
+    {
+      return json
+    }
+
+    let encoded = trimmed.hasPrefix("{") ? try decryptData(masterKey, trimmed) : trimmed
+    guard let jsonData = Data(base64URLEncoded: encoded) ?? encoded.data(using: .utf8),
           let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
     else {
       throw PasskeyCredentialStoreError.credentialEncodingFailed
@@ -425,6 +451,14 @@ final class PasskeyCredentialStore {
       }
     }
     return data
+  }
+
+  private static func secretStringData(_ secret: String) -> Data? {
+    let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.hasPrefix("0x") || trimmed.hasPrefix("0X") {
+      return Data(hex: String(trimmed.dropFirst(2)))
+    }
+    return Data(hex: trimmed) ?? Data(base64URLEncoded: trimmed) ?? Data(base64Encoded: trimmed)
   }
 }
 

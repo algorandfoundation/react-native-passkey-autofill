@@ -17,4 +17,5 @@ export type PasskeyAutofillCredentialIdentity = {
   publicKey?: string;
   publicKeyBase64?: string;
   createdAt?: number;
+  parentKeyId?: string;
 };

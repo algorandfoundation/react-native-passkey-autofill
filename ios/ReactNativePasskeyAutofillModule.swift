@@ -27,17 +27,6 @@ public class ReactNativePasskeyAutofillModule: Module {
       store.saveMasterKey(secret)
     }
 
-    AsyncFunction("setDerivedMainKey") { (secret: String) in
-      guard let store = PasskeyCredentialStore() else {
-        throw NSError(
-          domain: "ReactNativePasskeyAutofill",
-          code: 1,
-          userInfo: [NSLocalizedDescriptionKey: "App Group is not configured for passkey autofill."]
-        )
-      }
-      store.saveDerivedMainKey(secret)
-    }
-
     AsyncFunction("setHdRootKeyId") { (id: String) in
       guard let store = PasskeyCredentialStore() else {
         throw NSError(
@@ -111,6 +100,8 @@ public class ReactNativePasskeyAutofillModule: Module {
           return nil
         }
 
+        let metadata = credential["metadata"] as? [String: Any]
+
         return StoredPasskeyCredential(
           credentialId: credentialId,
           relyingPartyIdentifier: relyingPartyIdentifier.relyingPartyIdentifier,
@@ -118,7 +109,8 @@ public class ReactNativePasskeyAutofillModule: Module {
           userHandle: userHandle,
           privateKey: privateKey,
           publicKey: credential["publicKey"] as? String ?? credential["publicKeyBase64"] as? String,
-          createdAt: credential["createdAt"] as? Double ?? Date().timeIntervalSince1970
+          createdAt: credential["createdAt"] as? Double ?? Date().timeIntervalSince1970,
+          parentKeyId: credential["parentKeyId"] as? String ?? metadata?["parentKeyId"] as? String
         )
       }
 
@@ -154,6 +146,9 @@ public class ReactNativePasskeyAutofillModule: Module {
 
         if let publicKey = credential.publicKey {
           result["publicKey"] = publicKey
+        }
+        if let parentKeyId = credential.parentKeyId {
+          result["parentKeyId"] = parentKeyId
         }
 
         return result

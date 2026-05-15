@@ -1,6 +1,5 @@
 const mockModule = {
   setMasterKey: jest.fn(),
-  setDerivedMainKey: jest.fn(),
   setHdRootKeyId: jest.fn(),
   getHdRootKeyId: jest.fn(),
   configureIntentActions: jest.fn(),

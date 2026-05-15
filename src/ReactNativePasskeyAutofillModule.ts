@@ -7,12 +7,6 @@ import {
 
 declare class ReactNativePasskeyAutofillModule extends NativeModule<ReactNativePasskeyAutofillModuleEvents> {
   setMasterKey(secret: string): Promise<void>;
-  /**
-   * Stores the deterministic P-256 derived main key for the iOS
-   * Credential Provider extension. Android reads equivalent root material
-   * from the keystore using `setMasterKey` + `setHdRootKeyId`.
-   */
-  setDerivedMainKey(secret: string): Promise<void>;
   setHdRootKeyId(id: string): Promise<void>;
   getHdRootKeyId(): Promise<string | null>;
   configureIntentActions(getPasskeyAction: string, createPasskeyAction: string): Promise<void>;

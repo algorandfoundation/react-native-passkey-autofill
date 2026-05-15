@@ -1,3 +1,15 @@
+# [1.0.0-canary.16](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.15...v1.0.0-canary.16) (2026-05-15)
+
+
+### Bug Fixes
+
+* align ios autofill root key flow ([1287f57](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/1287f57952b41829032ef368bad826624375e9a3))
+
+
+### Features
+
+* add iOS passkey autofill provider ([9aad8f8](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/9aad8f8ceb2ad54cf53847b60dd6e70d5b2a1f2b))
+
 # [1.0.0-canary.15](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.14...v1.0.0-canary.15) (2026-04-10)
 
 ### Bug Fixes

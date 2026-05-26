@@ -3,6 +3,7 @@ const {
   withEntitlementsPlist,
   withInfoPlist,
   withStringsXml,
+  withAppBuildGradle,
   withProjectBuildGradle,
   withMainApplication,
   withDangerousMod,
@@ -718,7 +719,34 @@ const withPasskeyAutofill = (config, props = {}) => {
     return config;
   });
 
-  // 3. Add local Maven repository for local AAR
+  // 3. Inject `pickFirst '**/libmmkv.so'` into the consumer app's
+  // `android/app/build.gradle`. The native `libmmkv.so` is bundled by both
+  // this module (via `io.github.zhongwuzw:mmkv`) and `react-native-mmkv`
+  // (which also depends on the same artifact, sometimes pinned to a different
+  // version). When two copies end up on the merged-libs path, AGP fails
+  // `mergeDebugNativeLibs` with: "2 files found with path
+  // 'lib/<abi>/libmmkv.so'". Picking the first occurrence is safe because
+  // the `com.tencent.mmkv.MMKV` Java surface we touch is ABI-stable across
+  // the 2.x range.
+  config = withAppBuildGradle(config, (config) => {
+    const marker = "pickFirst '**/libmmkv.so'";
+    if (config.modResults.contents.includes(marker)) {
+      return config;
+    }
+    let contents = config.modResults.contents;
+    if (/packagingOptions\s*\{/.test(contents)) {
+      contents = contents.replace(/packagingOptions\s*\{/, `packagingOptions {\n        ${marker}`);
+    } else if (/android\s*\{/.test(contents)) {
+      contents = contents.replace(
+        /android\s*\{/,
+        `android {\n    packagingOptions {\n        ${marker}\n    }\n`,
+      );
+    }
+    config.modResults.contents = contents;
+    return config;
+  });
+
+  // 4. Add local Maven repository for local AAR
   config = withProjectBuildGradle(config, (config) => {
     if (config.modResults.contents.includes("android/libs/repo")) {
       return config;

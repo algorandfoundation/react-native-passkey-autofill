@@ -4,12 +4,11 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.service.PasskeyAutofillCredentialProviderService
-import co.algorand.passkeyautofill.service.PasskeyAutofillCredentialProviderService.Companion.KEY_LAST_INVOKED_AT_MS
-import com.tencent.mmkv.MMKV
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import org.bouncycastle.jce.provider.BouncyCastleProvider
@@ -159,33 +158,43 @@ class ReactNativePasskeyAutofillModule : Module() {
    * Returns `true` when this app's [PasskeyAutofillCredentialProviderService]
    * is registered as an active credential provider for the current user.
    *
-   * Android stores the enabled credential providers as a colon-separated list
-   * of flattened [ComponentName]s in the `credential_service` and
-   * `credential_service_primary` Secure settings (API 34+). However those
-   * keys are `@hide` on Android 12+, so reading them from a regular app
-   * throws `SecurityException`. We therefore combine two signals:
+   * On API 34+ (UpsideDownCake) we use the official
+   * [android.credentials.CredentialManager.isEnabledCredentialProviderService]
+   * API, which reflects the user's current toggle in Settings in real time.
    *
-   *  1. Best-effort: try [Settings.Secure.getString]; if it returns the
-   *     expected component we know for sure we're the provider.
-   *  2. Fallback: inspect the MMKV timestamp written by the service itself
-   *     whenever the system routes a `BeginCreate/BeginGetCredentialRequest`
-   *     to it ([PasskeyAutofillCredentialProviderService.KEY_LAST_INVOKED_AT_MS]).
-   *     The Credential Manager only routes requests to *enabled* providers,
-   *     so a non-zero stamp is proof that we were selected at least once.
+   * On older devices we fall back to a best-effort read of the `@hide`
+   * `credential_service` / `credential_service_primary` Secure settings. These
+   * typically throw `SecurityException` for non-system apps on Android 12+,
+   * in which case we conservatively return `false` rather than guess.
    */
   private fun isProviderEnabled(context: Context): Boolean {
-    val expected = ComponentName(
+    val component = ComponentName(
       context.packageName,
       PasskeyAutofillCredentialProviderService::class.java.name,
-    ).flattenToString()
+    )
+    val expected = component.flattenToString()
+
+    // Preferred path (API 34+, UpsideDownCake): ask the platform
+    // `CredentialManager` system service whether our component is enabled.
+    // This is the official, real-time-accurate signal and is trusted
+    // exclusively on supported OS versions.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      return try {
+        val cm = context.getSystemService(android.credentials.CredentialManager::class.java)
+        cm != null && cm.isEnabledCredentialProviderService(component)
+      } catch (e: Throwable) {
+        Log.d("ReactNativePasskeyAutofill", "CredentialManager.isEnabledCredentialProviderService failed: ${e.message}")
+        false
+      }
+    }
+
+    // Pre-API-34 best-effort: try the (often `@hide`) Secure settings keys.
     val resolver = context.contentResolver
     val keys = arrayOf("credential_service", "credential_service_primary")
     for (key in keys) {
       val value = try {
         Settings.Secure.getString(resolver, key)
       } catch (e: SecurityException) {
-        // `credential_service[_primary]` are @hide on Android 12+; fall
-        // through to the MMKV stamp check below.
         Log.d("ReactNativePasskeyAutofill", "Secure key $key not readable: ${e.message}")
         null
       } ?: continue
@@ -194,14 +203,7 @@ class ReactNativePasskeyAutofillModule : Module() {
         value.contains(expected, ignoreCase = true)
       if (enabled) return true
     }
-    // Fallback: look for a timestamp written by our CredentialProviderService.
-    return try {
-      MMKV.initialize(context)
-      (MMKV.defaultMMKV()?.decodeLong(KEY_LAST_INVOKED_AT_MS, 0L) ?: 0L) > 0L
-    } catch (e: Exception) {
-      Log.w("ReactNativePasskeyAutofill", "Failed to read provider stamp: ${e.message}")
-      false
-    }
+    return false
   }
 
   /**
@@ -210,8 +212,34 @@ class ReactNativePasskeyAutofillModule : Module() {
    * the credential provider screen is not available on the device.
    */
   private fun openCredentialProviderSettings(context: Context): Boolean {
+    // The system action for the Credential Manager provider picker is
+    // `android.settings.CREDENTIAL_PROVIDER` (`Settings.ACTION_CREDENTIAL_PROVIDER`,
+    // API 34+). Some OEM Settings builds additionally accept a
+    // `:settings:fragment_args_key` extra so the screen scrolls directly to
+    // our app's row instead of the generic list. We also include a legacy
+    // autofill-service picker fallback for devices where the Credential
+    // Manager screen isn't a directly launchable activity.
+    val component = ComponentName(
+      context.packageName,
+      PasskeyAutofillCredentialProviderService::class.java.name,
+    ).flattenToString()
     val intents = listOf(
+      // Preferred: Credential Manager provider settings, deep-linked to our row.
+      Intent("android.settings.CREDENTIAL_PROVIDER").apply {
+        putExtra(":settings:fragment_args_key", component)
+        putExtra(
+          ":settings:show_fragment_args",
+          android.os.Bundle().apply { putString(":settings:fragment_args_key", component) },
+        )
+      },
+      // Same screen without the deep-link extras (some OEMs ignore them).
       Intent("android.settings.CREDENTIAL_PROVIDER"),
+      // Legacy / fallback: the system autofill provider picker, which on
+      // pre-14 devices is the closest "pick a passkey provider" screen.
+      Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).apply {
+        data = Uri.parse("package:${context.packageName}")
+      },
+      // Last-resort fallback: this app's details page.
       Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
         data = Uri.fromParts("package", context.packageName, null)
       },

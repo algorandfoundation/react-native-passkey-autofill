@@ -93,6 +93,33 @@ class ReactNativePasskeyAutofillModule : Module() {
       }
     }
 
+    // NoOp on Android. iOS uses ASCredentialIdentityStore to advertise
+    // credentials to the system AutoFill UI; Android's Credential Manager
+    // queries the provider service on demand instead, so there is no
+    // equivalent identity store to populate.
+    AsyncFunction("replaceCredentialIdentities") { _: List<Map<String, Any?>> ->
+      // No-op: see comment above.
+    }
+
+    // NoOp on Android. See `replaceCredentialIdentities` above.
+    AsyncFunction("refreshCredentialIdentities") {
+      // No-op: see comment above.
+    }
+
+    // NoOp on Android. The iOS implementation returns credentials stored in
+    // the shared App Group keychain used by the AutoFill extension. On
+    // Android, credentials are managed by the CredentialProviderService and
+    // are not exposed back to JS through this module.
+    AsyncFunction("getStoredCredentials") {
+      emptyList<Map<String, Any?>>()
+    }
+
+    // NoOp on Android. iOS exposes diagnostics from the shared App Group
+    // store; there is no equivalent on Android yet.
+    AsyncFunction("getDiagnostics") {
+      emptyList<String>()
+    }
+
     AsyncFunction("isProviderActive") {
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
         ?: return@AsyncFunction false

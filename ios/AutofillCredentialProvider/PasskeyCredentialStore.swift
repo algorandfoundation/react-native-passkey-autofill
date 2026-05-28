@@ -21,6 +21,7 @@ struct StoredPasskeyCredential: Codable {
   let privateKey: String
   let publicKey: String?
   let createdAt: Double
+  let lastUsedAt: Double?
   let parentKeyId: String?
 }
 
@@ -158,6 +159,7 @@ final class PasskeyCredentialStore {
         privateKey: privateKey.base64EncodedString(),
         publicKey: publicKey.base64EncodedString(),
         createdAt: metadata?["createdAt"] as? Double ?? Date().timeIntervalSince1970,
+        lastUsedAt: metadata?["lastUsedAt"] as? Double,
         parentKeyId: parentKeyId
       )
     }
@@ -186,6 +188,9 @@ final class PasskeyCredentialStore {
       "createdAt": credential.createdAt,
       "registered": true,
     ]
+    if let lastUsedAt = credential.lastUsedAt {
+      metadata["lastUsedAt"] = lastUsedAt
+    }
     if let parentKeyId = credential.parentKeyId ?? hdRootKeyId() {
       metadata["parentKeyId"] = parentKeyId
     }
@@ -208,6 +213,29 @@ final class PasskeyCredentialStore {
       try PasskeyKeystoreMMKV.setString(encrypted, forKey: credential.credentialId, appGroup: appGroup)
     } catch {
       throw PasskeyCredentialStoreError.credentialStorageFailed
+    }
+  }
+
+  func recordCredentialUsage(id: String) {
+    guard let masterKey = masterKey(),
+          let appGroup = Bundle.main.object(forInfoDictionaryKey: Self.defaultSuiteNameKey) as? String
+    else { return }
+
+    for candidate in credentialIdCandidates(id) {
+      guard let payload = try? PasskeyKeystoreMMKV.string(forKey: candidate, appGroup: appGroup),
+            var keyData = try? decodeKeystorePayload(payload, masterKey: masterKey)
+      else { continue }
+
+      var metadata = keyData["metadata"] as? [String: Any] ?? [:]
+      metadata["lastUsedAt"] = Date().timeIntervalSince1970
+      metadata["count"] = ((metadata["count"] as? Int) ?? 0) + 1
+      keyData["metadata"] = metadata
+
+      guard let encoded = try? encodeKeyData(keyData),
+            let encrypted = try? encryptData(masterKey, encoded)
+      else { return }
+      try? PasskeyKeystoreMMKV.setString(encrypted, forKey: candidate, appGroup: appGroup)
+      return
     }
   }
   #endif

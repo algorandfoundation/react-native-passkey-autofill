@@ -166,6 +166,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         privateKey: privateKey.rawRepresentation.base64EncodedString(),
         publicKey: publicKey.base64EncodedString(),
         createdAt: Date().timeIntervalSince1970,
+        lastUsedAt: nil,
         parentKeyId: parentKeyId
       )
 
@@ -223,6 +224,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         credentialID: credential.credentialIdData
       )
       extensionContext.completeAssertionRequest(using: assertionCredential) { [weak self] _ in
+        self?.store?.recordCredentialUsage(id: credential.credentialId)
         self?.authContext = nil
         self?.isCompletingAssertion = false
         self?.pendingAssertionCredential = nil

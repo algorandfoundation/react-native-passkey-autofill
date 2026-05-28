@@ -46,7 +46,8 @@ interface CredentialRepository {
     fun getGetPasskeyAction(context: Context): String?
     fun clearCredentials(context: Context)
     fun deleteCredential(context: Context, credentialId: String)
-    
+    fun recordCredentialUsage(context: Context, credentialId: ByteArray)
+
     fun getBiometricCipherForEncryption(): Cipher
     fun getBiometricCipherForDecryption(iv: ByteArray): Cipher
 
@@ -565,6 +566,29 @@ class Repository() : CredentialRepository {
             }
         } catch (e: Exception) {
             Log.e(CredentialRepository.TAG, "Error deleting credential", e)
+        }
+    }
+
+    override fun recordCredentialUsage(context: Context, credentialId: ByteArray) {
+        val id = AndroidBase64.encodeToString(credentialId, AndroidBase64.DEFAULT).trim()
+        try {
+            val mmkv = getPasskeysMMKV(context)
+            val payload = mmkv.decodeString(id) ?: return
+            val masterKey = getMasterKey(context) ?: return
+
+            val json = decodeKeyData(payload, masterKey)
+            val metadata = json.optJSONObject("metadata") ?: JSONObject()
+            metadata.put("lastUsedAt", System.currentTimeMillis())
+            metadata.put("count", metadata.optInt("count", 0) + 1)
+            json.put("metadata", metadata)
+
+            val base64urlJson = AndroidBase64.encodeToString(
+                json.toString().toByteArray(Charsets.UTF_8),
+                AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP,
+            )
+            mmkv.encode(id, encryptData(masterKey, base64urlJson))
+        } catch (e: Exception) {
+            Log.e(CredentialRepository.TAG, "Failed to record credential usage", e)
         }
     }
 

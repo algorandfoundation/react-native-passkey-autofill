@@ -29,6 +29,7 @@ import co.algorand.passkeyautofill.utils.PasskeyUtils
 import java.security.KeyPair
 import java.security.MessageDigest
 import android.util.Base64 as AndroidBase64
+import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -251,8 +252,110 @@ class GetPasskeyActivity : AppCompatActivity() {
         layout.addView(cancelButton)
 
         setContentView(layout)
-        
+
         // Ensure the activity is focusable and can receive touches
+        layout.isFocusable = true
+        layout.isFocusableInTouchMode = true
+        layout.requestFocus()
+    }
+
+    private fun setupErrorUI(message: String, allowRetry: Boolean) {
+        if (isFinishing || isDestroyed) return
+
+        val layout = LinearLayout(this).apply {
+            val padding = (32 * resources.displayMetrics.density).toInt()
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, padding)
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(Color.WHITE)
+        }
+
+        try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            val appIcon = packageManager.getApplicationIcon(appInfo)
+            val appLabel = packageManager.getApplicationLabel(appInfo)
+
+            val density = resources.displayMetrics.density
+            val iconSize = (48 * density).toInt()
+            val iconMargin = (12 * density).toInt()
+            val headerPadding = (40 * density).toInt()
+
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, headerPadding)
+            }
+
+            val iconView = ImageView(this).apply {
+                setImageDrawable(appIcon)
+                layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                    marginEnd = iconMargin
+                }
+            }
+            header.addView(iconView)
+
+            val providerLabel = TextView(this).apply {
+                text = appLabel
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.DKGRAY)
+            }
+            header.addView(providerLabel)
+            layout.addView(header)
+        } catch (e: Exception) {
+        }
+
+        val title = TextView(this).apply {
+            text = "Couldn't sign in"
+            textSize = 28f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, 0, (8 * resources.displayMetrics.density).toInt())
+            setTextColor(Color.BLACK)
+        }
+        layout.addView(title)
+
+        val description = TextView(this).apply {
+            text = message
+            textSize = 16f
+            setPadding(0, 0, 0, (40 * resources.displayMetrics.density).toInt())
+            gravity = Gravity.CENTER_HORIZONTAL
+            setTextColor(Color.GRAY)
+        }
+        layout.addView(description)
+
+        if (allowRetry) {
+            val retryButton = Button(this).apply {
+                text = "Try Again"
+                contentDescription = "get-passkey-retry"
+                setOnClickListener {
+                    handleAssertion()
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 0, 0, (8 * resources.displayMetrics.density).toInt())
+                }
+            }
+            layout.addView(retryButton)
+        }
+
+        val closeButton = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+            text = "Close"
+            contentDescription = "get-passkey-cancel"
+            setOnClickListener {
+                setResult(RESULT_CANCELED)
+                finish()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        layout.addView(closeButton)
+
+        setContentView(layout)
+
         layout.isFocusable = true
         layout.isFocusableInTouchMode = true
         layout.requestFocus()
@@ -294,7 +397,19 @@ class GetPasskeyActivity : AppCompatActivity() {
                     Log.d(TAG, "Manual biometrics result: $result")
                     if (result == null) {
                         Log.w(TAG, "Biometrics failed or was canceled")
-                        setupUI() // Show UI as fallback
+                        val canUseBiometrics =
+                            BiometricManager.from(this@GetPasskeyActivity)
+                                .canAuthenticate(
+                                    BiometricManager.Authenticators.BIOMETRIC_STRONG,
+                                ) == BiometricManager.BIOMETRIC_SUCCESS
+                        if (canUseBiometrics) {
+                            setupUI()
+                        } else {
+                            setupErrorUI(
+                                "This device doesn't have a fingerprint or other strong biometric set up, which passkeys require. Add one in your device settings, then try again.",
+                                allowRetry = false,
+                            )
+                        }
                         isHandling = false
                         return@launch
                     }
@@ -469,13 +584,18 @@ class GetPasskeyActivity : AppCompatActivity() {
 
             setResult(Activity.RESULT_OK, resultIntent)
             Log.d(TAG, "Result set to OK")
+            credentialRepository.recordCredentialUsage(this@GetPasskeyActivity, credId)
             ReactNativePasskeyAutofillModule.instance?.sendEvent("onPasskeyAuthenticated", Bundle().apply {
                 putBoolean("success", true)
+                putString("credentialId", credentialIdEnc)
             })
             finish()
         } catch (e: Exception) {
             Log.e(TAG, "Error during passkey assertion", e)
-            setupUI() // Show UI on error
+            setupErrorUI(
+                "Something went wrong while signing in. Please try again.",
+                allowRetry = true,
+            )
             isHandling = false
         }
     }

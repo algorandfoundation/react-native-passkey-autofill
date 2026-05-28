@@ -25,8 +25,8 @@ import androidx.credentials.provider.CredentialProviderService
 import androidx.credentials.provider.ProviderClearCredentialStateRequest
 import androidx.credentials.provider.PublicKeyCredentialEntry
 import androidx.credentials.provider.BiometricPromptData
-import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import co.algorand.passkeyautofill.auth.BiometricRequirement
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.utils.PasskeyUtils
@@ -138,12 +138,14 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
 
         if (userVerification != "discouraged") {
             try {
-                val cipher = credentialRepository.getBiometricCipherForEncryption()
-                val biometricPromptData = BiometricPromptData.Builder()
-                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                    .setCryptoObject(BiometricPrompt.CryptoObject(cipher))
-                    .build()
-                builder.setBiometricPromptData(biometricPromptData)
+                val requirement = BiometricRequirement.resolve(this)
+                val biometricPromptDataBuilder = BiometricPromptData.Builder()
+                    .setAllowedAuthenticators(requirement.allowedAuthenticators)
+                if (requirement.isCryptoBound) {
+                    val cipher = credentialRepository.getBiometricCipherForEncryption(this, requirement)
+                    biometricPromptDataBuilder.setCryptoObject(BiometricPrompt.CryptoObject(cipher))
+                }
+                builder.setBiometricPromptData(biometricPromptDataBuilder.build())
                 Log.d(TAG, "Set BiometricPromptData for CreateEntry")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to set BiometricPromptData for CreateEntry", e)
@@ -243,26 +245,28 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
 
                     if (userVerification != "discouraged") {
                         try {
+                            val requirement = BiometricRequirement.resolve(this)
                             val biometricPromptDataBuilder = BiometricPromptData.Builder()
-                                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                            
-                            val iv = credential.biometricIv
-                            if (iv != null) {
-                                val ivBytes = AndroidBase64.decode(iv, AndroidBase64.DEFAULT)
-                                val cipher = credentialRepository.getBiometricCipherForDecryption(ivBytes)
-                                biometricPromptDataBuilder.setCryptoObject(BiometricPrompt.CryptoObject(cipher))
-                            } else {
-                                // Even if the key isn't locked, provide a CryptoObject to enable Single Tap 
-                                // and ensure the user is authenticated for this operation.
-                                try {
-                                    val cipher = credentialRepository.getBiometricCipherForEncryption()
+                                .setAllowedAuthenticators(requirement.allowedAuthenticators)
+
+                            if (requirement.isCryptoBound) {
+                                val iv = credential.biometricIv
+                                if (iv != null) {
+                                    val ivBytes = AndroidBase64.decode(iv, AndroidBase64.DEFAULT)
+                                    val cipher = credentialRepository.getBiometricCipherForDecryption(this, ivBytes, requirement)
                                     biometricPromptDataBuilder.setCryptoObject(BiometricPrompt.CryptoObject(cipher))
-                                } catch (e: Exception) {
-                                    Log.d(TAG, "Could not get encryption cipher for Single Tap: ${e.message}")
-                                    // Proceed without CryptoObject if getting one fails
+                                } else {
+                                    // Even if the key isn't locked, provide a CryptoObject to enable Single Tap
+                                    // and ensure the user is authenticated for this operation.
+                                    try {
+                                        val cipher = credentialRepository.getBiometricCipherForEncryption(this, requirement)
+                                        biometricPromptDataBuilder.setCryptoObject(BiometricPrompt.CryptoObject(cipher))
+                                    } catch (e: Exception) {
+                                        Log.d(TAG, "Could not get encryption cipher for Single Tap: ${e.message}")
+                                    }
                                 }
                             }
-                            
+
                             entryBuilder.setBiometricPromptData(biometricPromptDataBuilder.build())
                             Log.d(TAG, "Set BiometricPromptData for entry ${credential.userHandle}")
                         } catch (e: Exception) {

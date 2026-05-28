@@ -23,6 +23,7 @@ import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.credentials.webauthn.AuthenticatorAssertionResponse
 import androidx.credentials.webauthn.FidoPublicKeyCredential
 import androidx.credentials.webauthn.PublicKeyCredentialRequestOptions
+import co.algorand.passkeyautofill.auth.BiometricRequirement
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.utils.PasskeyUtils
@@ -374,10 +375,11 @@ class GetPasskeyActivity : AppCompatActivity() {
             val cipherToUse = systemUnlockedCipher ?: run {
                 if (biometricPromptResult != null) {
                     try {
+                        val requirement = BiometricRequirement.resolve(this@GetPasskeyActivity)
                         val fallback = if (biometricIv != null) {
-                            credentialRepository.getBiometricCipherForDecryption(AndroidBase64.decode(biometricIv, AndroidBase64.DEFAULT))
+                            credentialRepository.getBiometricCipherForDecryption(this@GetPasskeyActivity, AndroidBase64.decode(biometricIv, AndroidBase64.DEFAULT), requirement)
                         } else {
-                            credentialRepository.getBiometricCipherForEncryption()
+                            credentialRepository.getBiometricCipherForEncryption(this@GetPasskeyActivity, requirement)
                         }
                         Log.i(TAG, "Successfully obtained fallback cipher from repository (Single Tap timeout)")
                         fallback
@@ -397,16 +399,17 @@ class GetPasskeyActivity : AppCompatActivity() {
                     Log.d(TAG, "Manual biometrics result: $result")
                     if (result == null) {
                         Log.w(TAG, "Biometrics failed or was canceled")
+                        val requirement = BiometricRequirement.resolve(this@GetPasskeyActivity)
                         val canUseBiometrics =
                             BiometricManager.from(this@GetPasskeyActivity)
                                 .canAuthenticate(
-                                    BiometricManager.Authenticators.BIOMETRIC_STRONG,
+                                    requirement.allowedAuthenticators,
                                 ) == BiometricManager.BIOMETRIC_SUCCESS
                         if (canUseBiometrics) {
                             setupUI()
                         } else {
                             setupErrorUI(
-                                "This device doesn't have a fingerprint or other strong biometric set up, which passkeys require. Add one in your device settings, then try again.",
+                                "This device has no screen lock or biometric set up, which passkeys require. Add one in your device settings, then try again.",
                                 allowRetry = false,
                             )
                         }
@@ -602,6 +605,7 @@ class GetPasskeyActivity : AppCompatActivity() {
     }
 
     private suspend fun biometrics(iv: String?): BiometricPrompt.AuthenticationResult? {
+        val requirement = BiometricRequirement.resolve(this)
         return suspendCoroutine { continuation ->
             val biometricPrompt = BiometricPrompt(
                 this,
@@ -622,17 +626,19 @@ class GetPasskeyActivity : AppCompatActivity() {
                     }
                 }
             )
-            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            val promptInfoBuilder = BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Sign In")
                 .setSubtitle("Authenticate to use your passkey")
-                .setNegativeButtonText("Cancel")
-                .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                .build()
-            
-            if (iv != null) {
+                .setAllowedAuthenticators(requirement.allowedAuthenticators)
+            if (!requirement.allowsDeviceCredential) {
+                promptInfoBuilder.setNegativeButtonText("Cancel")
+            }
+            val promptInfo = promptInfoBuilder.build()
+
+            if (iv != null && requirement.isCryptoBound) {
                 try {
                     val ivBytes = AndroidBase64.decode(iv, AndroidBase64.DEFAULT)
-                    val cipher = credentialRepository.getBiometricCipherForDecryption(ivBytes)
+                    val cipher = credentialRepository.getBiometricCipherForDecryption(this, ivBytes, requirement)
                     biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to initialize biometric prompt with cipher", e)

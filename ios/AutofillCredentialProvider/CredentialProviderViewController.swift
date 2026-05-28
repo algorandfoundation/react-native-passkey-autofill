@@ -274,7 +274,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     context.localizedCancelTitle = "Cancel"
     context.localizedFallbackTitle = ""
 
-    let policy: LAPolicy = .deviceOwnerAuthentication
+    let policy: LAPolicy = BiometricRequirement.current.laPolicy
 
     var error: NSError?
     guard context.canEvaluatePolicy(policy, error: &error) else {
@@ -373,7 +373,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     context.localizedCancelTitle = "Cancel"
     context.localizedFallbackTitle = ""
 
-    let policy: LAPolicy = .deviceOwnerAuthentication
+    let policy: LAPolicy = BiometricRequirement.current.laPolicy
 
     var error: NSError?
     guard context.canEvaluatePolicy(policy, error: &error) else {

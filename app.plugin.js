@@ -20,6 +20,7 @@ const IOS_EXTENSION_FILES = [
   "PasskeyAutofillCredentialProvider-Bridging-Header.h",
   "PasskeyCredentialStore.swift",
   "WebAuthn.swift",
+  "BiometricRequirement.swift",
 ];
 const IOS_EXTENSION_SOURCE_FILES = IOS_EXTENSION_FILES.filter((file) => !file.endsWith(".h"));
 const DETERMINISTIC_P256_PACKAGE_URL =
@@ -60,6 +61,31 @@ const getAaguid = (props) => {
   return value;
 };
 
+const BIOMETRIC_REQUIREMENT_VALUES = ["strong", "strongOrCredential", "weakOrCredential"];
+const DEFAULT_BIOMETRIC_REQUIREMENT = "strongOrCredential";
+// Must match `META_DATA_KEY` in android/.../auth/BiometricRequirement.kt.
+const ANDROID_BIOMETRIC_META_DATA_NAME = "co.algorand.passkeyautofill.BIOMETRIC_REQUIREMENT";
+// Must match `infoDictionaryKey` in ios/AutofillCredentialProvider/BiometricRequirement.swift.
+const IOS_BIOMETRIC_INFO_PLIST_KEY = "ReactNativePasskeyAutofillBiometricRequirement";
+
+// Authenticators a passkey operation will accept. Default is intentionally more permissive than
+// strong-only: it leaves iOS unchanged (passcode still allowed) and lets Android accept the device
+// credential. See docs/superpowers/specs/2026-05-28-configurable-biometric-requirement-design.md.
+const getBiometricRequirement = (props) => {
+  if (props.biometricRequirement == null) {
+    return DEFAULT_BIOMETRIC_REQUIREMENT;
+  }
+  const value = String(props.biometricRequirement).trim();
+  if (!BIOMETRIC_REQUIREMENT_VALUES.includes(value)) {
+    throw new Error(
+      `react-native-passkey-autofill: "biometricRequirement" must be one of ${BIOMETRIC_REQUIREMENT_VALUES.join(
+        ", ",
+      )}, received "${props.biometricRequirement}".`,
+    );
+  }
+  return value;
+};
+
 const normalizeXcodeName = (name) => String(name || "").replace(/^"|"$/g, "");
 
 const getExtensionTarget = (project) => {
@@ -94,7 +120,7 @@ const writePlist = (filePath, body) => {
   fs.writeFileSync(filePath, body);
 };
 
-const extensionInfoPlist = ({ label, supportedDomains, aaguid }) => `<?xml version="1.0" encoding="UTF-8"?>
+const extensionInfoPlist = ({ label, supportedDomains, aaguid, biometricRequirement }) => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -116,7 +142,9 @@ const extensionInfoPlist = ({ label, supportedDomains, aaguid }) => `<?xml versi
   <string>$(PASSKEY_AUTOFILL_APP_GROUP)</string>
   <key>AppGroupIdentifier</key>
   <string>$(PASSKEY_AUTOFILL_APP_GROUP)</string>
-${aaguid ? `  <key>ReactNativePasskeyAutofillAAGUID</key>\n  <string>${aaguid}</string>\n` : ""}  <key>NSFaceIDUsageDescription</key>
+${aaguid ? `  <key>ReactNativePasskeyAutofillAAGUID</key>\n  <string>${aaguid}</string>\n` : ""}  <key>${IOS_BIOMETRIC_INFO_PLIST_KEY}</key>
+  <string>${biometricRequirement}</string>
+  <key>NSFaceIDUsageDescription</key>
   <string>Rocca uses Face ID to create and use passkeys.</string>
   <key>NSExtension</key>
   <dict>
@@ -172,6 +200,7 @@ const withIosPasskeyAutofill = (config, props = {}) => {
   const supportedDomains = props.supportedDomains || [associatedDomain];
   const appGroup = getAppGroup(config, props);
   const aaguid = getAaguid(props);
+  const biometricRequirement = getBiometricRequirement(props);
 
   config = withInfoPlist(config, (config) => {
     config.modResults.ReactNativePasskeyAutofillAppGroup = appGroup;
@@ -206,7 +235,7 @@ const withIosPasskeyAutofill = (config, props = {}) => {
 
       writePlist(
         path.join(extensionRoot, `${IOS_EXTENSION_NAME}-Info.plist`),
-        extensionInfoPlist({ label, supportedDomains, aaguid }),
+        extensionInfoPlist({ label, supportedDomains, aaguid, biometricRequirement }),
       );
       writePlist(
         path.join(extensionRoot, `${IOS_EXTENSION_NAME}.entitlements`),
@@ -634,6 +663,23 @@ const withPasskeyAutofill = (config, props = {}) => {
     return config;
   });
 
+  // Expose the configured biometric requirement to the native provider/activities.
+  config = withAndroidManifest(config, (config) => {
+    const application = config.modResults.manifest.application[0];
+    if (!application["meta-data"]) {
+      application["meta-data"] = [];
+    }
+    const name = ANDROID_BIOMETRIC_META_DATA_NAME;
+    const existing = application["meta-data"].find((m) => m["$"]["android:name"] === name);
+    const value = getBiometricRequirement(props);
+    if (existing) {
+      existing["$"]["android:value"] = value;
+    } else {
+      application["meta-data"].push({ $: { "android:name": name, "android:value": value } });
+    }
+    return config;
+  });
+
   // 2. Add asset_statements string to strings.xml
   config = withStringsXml(config, (config) => {
     const stringItems = [
@@ -696,3 +742,4 @@ const withPasskeyAutofill = (config, props = {}) => {
 };
 
 module.exports = withPasskeyAutofill;
+module.exports.getBiometricRequirement = getBiometricRequirement;

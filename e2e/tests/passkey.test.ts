@@ -10,7 +10,6 @@ import { PLATFORM, ANDROID_PACKAGE } from "../driver/capabilities";
 import {
   ensureBiometricEnrolled,
   pumpFingerprintUntil,
-  restoreAppFocus,
   currentPackage,
   currentActivity,
 } from "../driver/fingerprint";

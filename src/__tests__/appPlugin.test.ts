@@ -21,9 +21,9 @@ describe("getBiometricRequirement", () => {
   });
 
   it("throws on an unknown value", () => {
-    expect(() => plugin.getBiometricRequirement({ biometricRequirement: "fingerprintOnly" })).toThrow(
-      /biometricRequirement/,
-    );
+    expect(() =>
+      plugin.getBiometricRequirement({ biometricRequirement: "fingerprintOnly" }),
+    ).toThrow(/biometricRequirement/);
   });
 });
 

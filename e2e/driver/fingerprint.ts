@@ -1,7 +1,7 @@
 import { PLATFORM, ANDROID_PACKAGE } from "./capabilities";
 import type { Driver } from "./session";
 import { confirmSystemPrompt, byTestId } from "./selectors";
-import { adb, adbAsync, adbSilent, getAdbSerial } from "./adb";
+import { adbAsync, adbSilent, getAdbSerial } from "./adb";
 
 /**
  * Fingerprint enrollment + trigger helpers for the Android emulator.

@@ -51,11 +51,11 @@ If you are using Expo, you can configure the plugin in your `app.json` or `app.c
 
 `biometricRequirement` is an optional string property that controls which authenticators are accepted for user verification during passkey creation and authentication.
 
-| Value | Android | iOS |
-| --- | --- | --- |
-| `strong` | Strong biometric only | Biometrics only (passcode rejected) |
-| `strongOrCredential` (default) | Strong biometric or device PIN/pattern/password | Biometrics or device passcode |
-| `weakOrCredential` | Weak biometric or device credential (key is **not** crypto-bound — a security trade-off) | Biometrics or device passcode |
+| Value                          | Android                                                                                  | iOS                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------- | ----------------------------------- |
+| `strong`                       | Strong biometric only                                                                    | Biometrics only (passcode rejected) |
+| `strongOrCredential` (default) | Strong biometric or device PIN/pattern/password                                          | Biometrics or device passcode       |
+| `weakOrCredential`             | Weak biometric or device credential (key is **not** crypto-bound — a security trade-off) | Biometrics or device passcode       |
 
 **Notes:**
 

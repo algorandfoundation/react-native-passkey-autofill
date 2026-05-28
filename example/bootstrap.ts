@@ -1,12 +1,6 @@
 import { Store } from "@tanstack/store";
 import ReactNativePasskeyAutofill from "@algorandfoundation/react-native-passkey-autofill";
-import {
-  clearKeyData,
-  initializeKeyStore,
-  Key,
-  KeyData,
-  KeyStoreState,
-} from "@algorandfoundation/keystore";
+import { initializeKeyStore, Key, KeyData, KeyStoreState } from "@algorandfoundation/keystore";
 import { fetchSecret, getMasterKey, storage } from "@algorandfoundation/react-native-keystore";
 import { keyStore } from "./stores/keystore";
 import { passkeysStore } from "./stores/passkeys";
@@ -30,7 +24,7 @@ export async function fullReload() {
   );
   const keys = secrets
     .filter((k) => k !== null)
-    .map(({ privateKey, ...rest }: KeyData) => rest) as Key[];
+    .map(({ privateKey: _privateKey, ...rest }: KeyData) => rest) as Key[];
   initializeKeyStore({
     store: keyStore as unknown as Store<KeyStoreState>,
     keys,
@@ -55,7 +49,7 @@ export async function bootstrap() {
 
   const keys = secrets
     .filter((k) => k !== null)
-    .map(({ privateKey, ...rest }: KeyData) => rest) as Key[];
+    .map(({ privateKey: _privateKey, ...rest }: KeyData) => rest) as Key[];
 
   const hdRootKey = keys.find(
     (k) => k.type === "hd-root-key" || k.type === "xhd-root-key" || k.type === "hd-seed",

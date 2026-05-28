@@ -1,5 +1,5 @@
 import { PLATFORM, ANDROID_PACKAGE } from "./capabilities";
-import { adb, adbSilent } from "./adb";
+import { adbSilent } from "./adb";
 
 /**
  * Credential Manager provider registration helper (Android only).

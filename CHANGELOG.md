@@ -1,3 +1,18 @@
+# [1.0.0-canary.17](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.16...v1.0.0-canary.17) (2026-05-28)
+
+
+### Bug Fixes
+
+* allow configurable AAGUID ([d5a8176](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/d5a81765ba150e9873e18875f0ac9f7bc4aede93))
+* **Android:** add NoOp methods for iOS-specific functionality ([e2c64db](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/e2c64db479cda70c7c61b7ab3021b70db949a15b))
+* compile issue ([16b939c](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/16b939cb555e75bd052ce57a41a838810a2770cd))
+
+
+### Features
+
+* configurable credential requirement ([dc09916](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/dc09916d1ee5c8c9d33e53b57f00171472f4f665))
+* record lastUsedAt/count and fix error handling ([47b40ab](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/47b40abf692c0f7cffee6f2266c66f61f8006a65))
+
 # [1.0.0-canary.16](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.15...v1.0.0-canary.16) (2026-05-15)
 
 ### Bug Fixes

@@ -743,3 +743,4 @@ const withPasskeyAutofill = (config, props = {}) => {
 
 module.exports = withPasskeyAutofill;
 module.exports.getBiometricRequirement = getBiometricRequirement;
+module.exports.getAaguid = getAaguid;

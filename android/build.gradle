@@ -46,6 +46,9 @@ android {
   }
   testOptions {
     unitTests.includeAndroidResources = true
+    // Let unmocked android.jar calls (e.g. android.util.Log) return defaults instead of throwing
+    // "Stub!" in JVM unit tests.
+    unitTests.returnDefaultValues = true
   }
   packagingOptions {
     pickFirst '**/libc++_shared.so'

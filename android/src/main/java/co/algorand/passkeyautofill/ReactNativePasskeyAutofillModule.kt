@@ -104,6 +104,28 @@ class ReactNativePasskeyAutofillModule : Module() {
         ?: return@AsyncFunction false
       openCredentialProviderSettings(context)
     }
+
+    AsyncFunction("getStoredCredentials") {
+      val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
+        ?: return@AsyncFunction emptyList<Map<String, Any>>()
+      credentialRepository.getAllCredentials(context).map { credential ->
+        mapOf(
+          "credentialId" to credential.credentialId,
+          "relyingPartyIdentifier" to credential.origin,
+          "userName" to credential.userHandle,
+          "userHandle" to credential.userHandle,
+          "publicKey" to credential.publicKey,
+        )
+      }
+    }
+
+    // The iOS AutoFill identity store (ASCredentialIdentityStore) has no
+    // Android analogue: our CredentialProviderService answers each
+    // BeginGetCredentialRequest from MMKV on demand, so there is no store to
+    // pre-populate. This is a no-op purely to satisfy the shared JS API.
+    AsyncFunction("refreshCredentialIdentities") {
+      // no-op on Android
+    }
   }
 
   /**

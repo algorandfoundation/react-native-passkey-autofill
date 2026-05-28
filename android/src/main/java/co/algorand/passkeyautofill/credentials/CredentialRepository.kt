@@ -22,6 +22,7 @@ import org.json.JSONObject
 import android.util.Base64 as AndroidBase64
 import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
+import co.algorand.passkeyautofill.auth.BiometricRequirement
 
 
 interface CredentialRepository {
@@ -46,9 +47,10 @@ interface CredentialRepository {
     fun getGetPasskeyAction(context: Context): String?
     fun clearCredentials(context: Context)
     fun deleteCredential(context: Context, credentialId: String)
-    
-    fun getBiometricCipherForEncryption(): Cipher
-    fun getBiometricCipherForDecryption(iv: ByteArray): Cipher
+    fun recordCredentialUsage(context: Context, credentialId: ByteArray)
+
+    fun getBiometricCipherForEncryption(context: Context, requirement: BiometricRequirement): Cipher
+    fun getBiometricCipherForDecryption(context: Context, iv: ByteArray, requirement: BiometricRequirement): Cipher
 
     companion object {
         const val TAG = "CredentialRepository"
@@ -61,6 +63,7 @@ interface CredentialRepository {
         const val KEYCHAIN_STORAGE_NAME = "PasskeyAutofillKeychain"
         const val PASSKEY_AUTOFILL_MMKV_ID = "passkey_autofill"
         const val HD_ROOT_KEY_ID_KEY = "hd_root_key_id"
+        const val BIOMETRIC_KEY_LEVEL_KEY = "biometric_key_level"
 
         /**
          * JCE provider that exposes AndroidKeyStore-backed symmetric Cipher
@@ -568,6 +571,29 @@ class Repository() : CredentialRepository {
         }
     }
 
+    override fun recordCredentialUsage(context: Context, credentialId: ByteArray) {
+        val id = AndroidBase64.encodeToString(credentialId, AndroidBase64.DEFAULT).trim()
+        try {
+            val mmkv = getPasskeysMMKV(context)
+            val payload = mmkv.decodeString(id) ?: return
+            val masterKey = getMasterKey(context) ?: return
+
+            val json = decodeKeyData(payload, masterKey)
+            val metadata = json.optJSONObject("metadata") ?: JSONObject()
+            metadata.put("lastUsedAt", System.currentTimeMillis())
+            metadata.put("count", metadata.optInt("count", 0) + 1)
+            json.put("metadata", metadata)
+
+            val base64urlJson = AndroidBase64.encodeToString(
+                json.toString().toByteArray(Charsets.UTF_8),
+                AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP,
+            )
+            mmkv.encode(id, encryptData(masterKey, base64urlJson))
+        } catch (e: Exception) {
+            Log.e(CredentialRepository.TAG, "Failed to record credential usage", e)
+        }
+    }
+
     private fun credentialIdCandidates(id: String): Set<String> {
         val candidates = mutableSetOf(id)
         val decoded = try {
@@ -602,7 +628,19 @@ class Repository() : CredentialRepository {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    private fun getBiometricSecretKey(): SecretKey {
+    private fun getBiometricSecretKey(context: Context, requirement: BiometricRequirement): SecretKey {
+        // The key's auth binding is fixed at creation. If a new build changed the configured
+        // level, regenerate the key so the prompt's allowed authenticators stay compatible.
+        // Passkey private keys are deterministically re-derivable, so this is recoverable.
+        val mmkv = getAutofillMMKV(context)
+        val storedLevel = mmkv.decodeString(CredentialRepository.BIOMETRIC_KEY_LEVEL_KEY)
+        if (keyStore.containsAlias(CredentialRepository.BIOMETRIC_KEY_ALIAS) &&
+            storedLevel != requirement.name
+        ) {
+            Log.i(CredentialRepository.TAG, "Biometric requirement changed ($storedLevel -> ${requirement.name}); regenerating key")
+            keyStore.deleteEntry(CredentialRepository.BIOMETRIC_KEY_ALIAS)
+        }
+
         if (!keyStore.containsAlias(CredentialRepository.BIOMETRIC_KEY_ALIAS)) {
             val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
             val builder = KeyGenParameterSpec.Builder(
@@ -612,19 +650,22 @@ class Repository() : CredentialRepository {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
-                .setUserAuthenticationRequired(true)
-                .setInvalidatedByBiometricEnrollment(true)
-            
-            // Use both old and new APIs for maximum compatibility with time-bound unlock
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                builder.setUserAuthenticationParameters(60, KeyProperties.AUTH_BIOMETRIC_STRONG)
-            } else {
-                @Suppress("DEPRECATION")
-                builder.setUserAuthenticationValidityDurationSeconds(60)
+                .setUserAuthenticationRequired(requirement.isCryptoBound)
+
+            // Biometric-enrollment invalidation and auth params only apply to user-auth-bound keys.
+            if (requirement.isCryptoBound) {
+                builder.setInvalidatedByBiometricEnrollment(true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    builder.setUserAuthenticationParameters(60, requirement.keystoreAuthType)
+                } else {
+                    @Suppress("DEPRECATION")
+                    builder.setUserAuthenticationValidityDurationSeconds(60)
+                }
             }
-            
+
             keyGenerator.init(builder.build())
             keyGenerator.generateKey()
+            mmkv.encode(CredentialRepository.BIOMETRIC_KEY_LEVEL_KEY, requirement.name)
         }
         return keyStore.getKey(CredentialRepository.BIOMETRIC_KEY_ALIAS, null) as SecretKey
     }
@@ -655,15 +696,15 @@ class Repository() : CredentialRepository {
         }
     }
 
-    override fun getBiometricCipherForEncryption(): Cipher {
+    override fun getBiometricCipherForEncryption(context: Context, requirement: BiometricRequirement): Cipher {
         val cipher = newAndroidKeyStoreAesGcmCipher()
-        cipher.init(Cipher.ENCRYPT_MODE, getBiometricSecretKey())
+        cipher.init(Cipher.ENCRYPT_MODE, getBiometricSecretKey(context, requirement))
         return cipher
     }
 
-    override fun getBiometricCipherForDecryption(iv: ByteArray): Cipher {
+    override fun getBiometricCipherForDecryption(context: Context, iv: ByteArray, requirement: BiometricRequirement): Cipher {
         val cipher = newAndroidKeyStoreAesGcmCipher()
-        cipher.init(Cipher.DECRYPT_MODE, getBiometricSecretKey(), GCMParameterSpec(128, iv))
+        cipher.init(Cipher.DECRYPT_MODE, getBiometricSecretKey(context, requirement), GCMParameterSpec(128, iv))
         return cipher
     }
 

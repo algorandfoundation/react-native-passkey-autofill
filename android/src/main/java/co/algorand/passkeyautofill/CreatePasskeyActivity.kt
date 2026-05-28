@@ -22,6 +22,7 @@ import androidx.credentials.provider.ProviderCreateCredentialRequest
 import androidx.credentials.webauthn.AuthenticatorAttestationResponse
 import androidx.credentials.webauthn.FidoPublicKeyCredential
 import androidx.credentials.webauthn.PublicKeyCredentialCreationOptions
+import co.algorand.passkeyautofill.auth.BiometricRequirement
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.utils.PasskeyUtils
@@ -282,7 +283,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
             val cipherToUse = systemUnlockedCipher ?: run {
                 if (biometricPromptResult != null) {
                     try {
-                        val fallback = credentialRepository.getBiometricCipherForEncryption()
+                        val fallback = credentialRepository.getBiometricCipherForEncryption(this@CreatePasskeyActivity, BiometricRequirement.resolve(this@CreatePasskeyActivity))
                         Log.i(TAG, "Successfully obtained fallback cipher from repository (Single Tap timeout)")
                         fallback
                     } catch (e: Exception) {
@@ -424,6 +425,15 @@ class CreatePasskeyActivity : AppCompatActivity() {
             val clientDataJSONb64 = AndroidBase64.encodeToString(clientDataJSONString.toByteArray(), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING)
             respJson.put("clientDataJSON", clientDataJSONb64)
 
+            WebAuthn.configuredAaguid(this@CreatePasskeyActivity)?.let { aaguid ->
+                try {
+                    val patched = WebAuthn.injectAaguid(respJson.getString("attestationObject"), aaguid)
+                    respJson.put("attestationObject", patched)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to inject AAGUID into attestationObject", e)
+                }
+            }
+
             val createResponse = CreatePublicKeyCredentialResponse(fullJson.toString())
             Log.d(TAG, "CreatePublicKeyCredentialResponse: ${fullJson.toString()}")
             
@@ -447,6 +457,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
     }
 
     private suspend fun biometrics(needsCipher: Boolean): BiometricPrompt.AuthenticationResult? {
+        val requirement = BiometricRequirement.resolve(this)
         return suspendCoroutine { continuation ->
             val biometricPrompt = BiometricPrompt(
                 this,
@@ -465,16 +476,19 @@ class CreatePasskeyActivity : AppCompatActivity() {
                     }
                 }
             )
-            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            val promptInfoBuilder = BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Create Passkey")
                 .setSubtitle("Authenticate to save your passkey")
-                .setNegativeButtonText("Cancel")
-                .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                .build()
-            
-            if (needsCipher) {
+                .setAllowedAuthenticators(requirement.allowedAuthenticators)
+            // A negative button is illegal when DEVICE_CREDENTIAL is allowed; the system shows its own.
+            if (!requirement.allowsDeviceCredential) {
+                promptInfoBuilder.setNegativeButtonText("Cancel")
+            }
+            val promptInfo = promptInfoBuilder.build()
+
+            if (needsCipher && requirement.isCryptoBound) {
                 try {
-                    val cipher = credentialRepository.getBiometricCipherForEncryption()
+                    val cipher = credentialRepository.getBiometricCipherForEncryption(this, requirement)
                     biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to initialize biometric prompt with cipher", e)

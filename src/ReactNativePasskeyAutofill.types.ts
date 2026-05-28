@@ -1,6 +1,6 @@
 export type ReactNativePasskeyAutofillModuleEvents = {
   onPasskeyAdded: (event: { success: boolean }) => void;
-  onPasskeyAuthenticated: (event: { success: boolean }) => void;
+  onPasskeyAuthenticated: (event: { success: boolean; credentialId?: string }) => void;
 };
 
 export type PasskeyAutofillCredentialIdentity = {
@@ -17,5 +17,6 @@ export type PasskeyAutofillCredentialIdentity = {
   publicKey?: string;
   publicKeyBase64?: string;
   createdAt?: number;
+  lastUsedAt?: number;
   parentKeyId?: string;
 };

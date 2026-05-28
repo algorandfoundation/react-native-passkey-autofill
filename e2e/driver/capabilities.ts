@@ -63,6 +63,9 @@ export const androidCapabilities: Capabilities = {
   ...(process.env.ANDROID_PLATFORM_VERSION
     ? { "appium:platformVersion": process.env.ANDROID_PLATFORM_VERSION }
     : {}),
+  // Pin the target device when set (matches `ANDROID_UDID` used by the adb
+  // helpers) so a run is deterministic when multiple devices are attached.
+  ...(process.env.ANDROID_UDID ? { "appium:udid": process.env.ANDROID_UDID } : {}),
   "appium:deviceName": process.env.ANDROID_DEVICE_NAME ?? "Android Emulator",
   "appium:app": ANDROID_APP_PATH,
   "appium:appPackage": ANDROID_PACKAGE,

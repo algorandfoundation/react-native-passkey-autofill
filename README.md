@@ -44,6 +44,23 @@ If you are using Expo, you can configure the plugin in your `app.json` or `app.c
 
 - `site`: The URL of your FIDO server (default: `https://debug.liquidauth.com`).
 - `label`: The name of the credential provider as it appears in Android settings (default: `My Credential Provider`).
+- `aaguid`: Optional authenticator AAGUID (UUID string) embedded in attestation responses to identify your authenticator to relying parties. When omitted, iOS uses the module's built-in default and Android uses the all-zero AAGUID emitted by the platform. Set the same value across all your apps (iOS, Android, web) so they present one identity.
+- `biometricRequirement`: Controls which authenticators satisfy passkey user verification. See [Biometric Requirement](#biometric-requirement) below.
+
+#### Biometric Requirement
+
+`biometricRequirement` is an optional string property that controls which authenticators are accepted for user verification during passkey creation and authentication.
+
+| Value                          | Android                                                                                  | iOS                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------- | ----------------------------------- |
+| `strong`                       | Strong biometric only                                                                    | Biometrics only (passcode rejected) |
+| `strongOrCredential` (default) | Strong biometric or device PIN/pattern/password                                          | Biometrics or device passcode       |
+| `weakOrCredential`             | Weak biometric or device credential (key is **not** crypto-bound — a security trade-off) | Biometrics or device passcode       |
+
+**Notes:**
+
+- Android cannot gate a hardware-backed key on weak biometrics, so `weakOrCredential` stores the key without user-authentication binding and uses the biometric prompt as a UI gate only. Use it only when you accept that trade-off.
+- The default `strongOrCredential` is more permissive than the previous strong-only behavior; integrators upgrading will additionally allow the device credential on Android (iOS behavior is unchanged).
 
 ### Configure for iOS
 

@@ -13,7 +13,20 @@ enum WebAuthnError: LocalizedError {
 }
 
 enum WebAuthn {
-  static let aaguid = UUID(uuidString: "1F59713A-C021-4E63-9158-2CC5FDC14E52")!
+  private static let aaguidInfoDictionaryKey = "ReactNativePasskeyAutofillAAGUID"
+  private static let defaultAaguid = UUID(uuidString: "1F59713A-C021-4E63-9158-2CC5FDC14E52")!
+
+  // Injected by the Expo config plugin (`aaguid` prop) via the extension Info.plist so all
+  // platforms can present the same authenticator identity; falls back to the module default.
+  static let aaguid: UUID = {
+    guard
+      let raw = Bundle.main.object(forInfoDictionaryKey: aaguidInfoDictionaryKey) as? String,
+      let configured = UUID(uuidString: raw)
+    else {
+      return defaultAaguid
+    }
+    return configured
+  }()
 
   static func authenticatorDataForAssertion(relyingPartyIdentifier: String) -> Data {
     var data = Data(SHA256.hash(data: Data(relyingPartyIdentifier.utf8)))

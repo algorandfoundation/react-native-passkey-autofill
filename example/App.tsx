@@ -99,7 +99,7 @@ function AppContent() {
     if (passkeys.length > 0 && !activePasskeyId) {
       setActivePasskeyId(passkeys[0].id);
     }
-  }, [keys, passkeys]);
+  }, [keys, passkeys, activePasskeyId]);
 
   useEffect(() => {
     if (!account) {

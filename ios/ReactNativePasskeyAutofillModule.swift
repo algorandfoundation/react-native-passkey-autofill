@@ -110,6 +110,7 @@ public class ReactNativePasskeyAutofillModule: Module {
           privateKey: privateKey,
           publicKey: credential["publicKey"] as? String ?? credential["publicKeyBase64"] as? String,
           createdAt: credential["createdAt"] as? Double ?? Date().timeIntervalSince1970,
+          lastUsedAt: credential["lastUsedAt"] as? Double ?? metadata?["lastUsedAt"] as? Double,
           parentKeyId: credential["parentKeyId"] as? String ?? metadata?["parentKeyId"] as? String
         )
       }
@@ -146,6 +147,9 @@ public class ReactNativePasskeyAutofillModule: Module {
 
         if let publicKey = credential.publicKey {
           result["publicKey"] = publicKey
+        }
+        if let lastUsedAt = credential.lastUsedAt {
+          result["lastUsedAt"] = lastUsedAt
         }
         if let parentKeyId = credential.parentKeyId {
           result["parentKeyId"] = parentKeyId

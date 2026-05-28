@@ -44,6 +44,7 @@ If you are using Expo, you can configure the plugin in your `app.json` or `app.c
 
 - `site`: The URL of your FIDO server (default: `https://debug.liquidauth.com`).
 - `label`: The name of the credential provider as it appears in Android settings (default: `My Credential Provider`).
+- `aaguid`: Optional authenticator AAGUID (UUID string) embedded in attestation responses to identify your authenticator to relying parties. When omitted, iOS uses the module's built-in default and Android uses the all-zero AAGUID emitted by the platform. Set the same value across all your apps (iOS, Android, web) so they present one identity.
 
 ### Configure for iOS
 

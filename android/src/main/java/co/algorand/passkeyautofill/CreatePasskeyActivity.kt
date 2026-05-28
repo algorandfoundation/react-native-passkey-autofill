@@ -424,6 +424,15 @@ class CreatePasskeyActivity : AppCompatActivity() {
             val clientDataJSONb64 = AndroidBase64.encodeToString(clientDataJSONString.toByteArray(), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING)
             respJson.put("clientDataJSON", clientDataJSONb64)
 
+            WebAuthn.configuredAaguid(this)?.let { aaguid ->
+                try {
+                    val patched = WebAuthn.injectAaguid(respJson.getString("attestationObject"), aaguid)
+                    respJson.put("attestationObject", patched)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to inject AAGUID into attestationObject", e)
+                }
+            }
+
             val createResponse = CreatePublicKeyCredentialResponse(fullJson.toString())
             Log.d(TAG, "CreatePublicKeyCredentialResponse: ${fullJson.toString()}")
             

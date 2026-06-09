@@ -572,6 +572,44 @@ class GetPasskeyActivity : AppCompatActivity() {
             val credProps = JSONObject()
             credProps.put("rk", true)
             clientExtensionResults.put("credProps", credProps)
+
+            // WebAuthn `prf` extension (hmac-secret). If the RP requested PRF
+            // evaluation for this assertion, derive the per-credential
+            // `credRandom` from the wallet HD root secret and compute
+            // HMAC-SHA256-based outputs for the supplied salt(s).
+            try {
+                val credentialIdB64Url = AndroidBase64.encodeToString(
+                    credId,
+                    AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING,
+                )
+                val prfInput = Prf.parseInput(passkeyRequestJsonObj, credentialIdB64Url)
+                if (prfInput != null) {
+                    val hdRootSecret = credentialRepository.getHdRootSecret(this@GetPasskeyActivity)
+                    if (hdRootSecret == null) {
+                        Log.w(TAG, "PRF input present but HD root secret unavailable; skipping PRF output")
+                    } else {
+                        val credRandom = Prf.credRandom(
+                            hdRootSecret = hdRootSecret,
+                            relyingPartyIdentifier = displayOrigin,
+                            userHandle = dbCred.userHandle,
+                        )
+                        val first = Prf.evaluate(credRandom, prfInput.first, prfInput.alreadyHashed)
+                        val second = prfInput.second?.let { Prf.evaluate(credRandom, it, prfInput.alreadyHashed) }
+
+                        val prfResults = JSONObject().put("first", Prf.encodeOutput(first))
+                        if (second != null) {
+                            prfResults.put("second", Prf.encodeOutput(second))
+                        }
+                        clientExtensionResults.put("prf", JSONObject().put("results", prfResults))
+                        Log.d(TAG, "Computed PRF assertion output (second present=${second != null})")
+                    }
+                }
+            } catch (e: Exception) {
+                // Never fail the assertion because of a PRF error; just log
+                // and omit the extension result.
+                Log.w(TAG, "Failed to compute PRF assertion output", e)
+            }
+
             fullJson.put("clientExtensionResults", clientExtensionResults)
 
             val credentialJson = fullJson.toString()

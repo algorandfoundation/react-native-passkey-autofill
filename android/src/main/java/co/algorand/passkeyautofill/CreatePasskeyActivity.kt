@@ -434,6 +434,22 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 }
             }
 
+            // WebAuthn `prf` extension (hmac-secret).
+            // On registration we advertise `enabled = true` whenever the RP
+            // asked for the extension, signalling that the credential can be
+            // used as a PRF source on subsequent assertions. We deliberately
+            // do not evaluate salts on create — this matches the behaviour of
+            // most platform authenticators.
+            val requestExtensions = requestJson.optJSONObject("publicKey")?.optJSONObject("extensions")
+                ?: requestJson.optJSONObject("extensions")
+            if (requestExtensions?.has("prf") == true || requestExtensions?.has("prfAlreadyHashed") == true) {
+                val clientExtensionResults = fullJson.optJSONObject("clientExtensionResults") ?: JSONObject()
+                val prfResult = JSONObject().put("enabled", true)
+                clientExtensionResults.put("prf", prfResult)
+                fullJson.put("clientExtensionResults", clientExtensionResults)
+                Log.d(TAG, "Advertised PRF support on registration")
+            }
+
             val createResponse = CreatePublicKeyCredentialResponse(fullJson.toString())
             Log.d(TAG, "CreatePublicKeyCredentialResponse: ${fullJson.toString()}")
             

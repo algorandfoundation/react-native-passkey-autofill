@@ -52,6 +52,13 @@ interface CredentialRepository {
     fun getBiometricCipherForEncryption(context: Context, requirement: BiometricRequirement): Cipher
     fun getBiometricCipherForDecryption(context: Context, iv: ByteArray, requirement: BiometricRequirement): Cipher
 
+    /**
+     * Returns the raw HD root secret (seed bytes) that is used to derive
+     * domain-specific signing keys. Required by the PRF extension to
+     * deterministically derive the per-credential `credRandom` secret.
+     */
+    fun getHdRootSecret(context: Context): ByteArray?
+
     companion object {
         const val TAG = "CredentialRepository"
         const val PASSKEYS_MMKV_ID = "keystore"
@@ -325,47 +332,51 @@ class Repository() : CredentialRepository {
         biometricCipher: Cipher?
     ): KeyPair {
         Log.d(CredentialRepository.TAG, "createDeterministicKeyPair for origin: $origin, userHandle: $userHandle")
-        val masterKey = getMasterKey(context) ?: throw IllegalStateException("Master key not found in Keystore. Ensure you have called setMasterKey(key) from JavaScript.")
-        
+        val derivedParentSecret = getHdRootSecret(context)
+            ?: throw IllegalStateException("HD Root Key not available. Ensure setMasterKey(key) and setHdRootKeyId(id) have been called.")
+        return dP256.genDomainSpecificKeypair(derivedParentSecret, origin, userHandle.lowercase())
+    }
+
+    override fun getHdRootSecret(context: Context): ByteArray? {
+        val masterKey = getMasterKey(context) ?: return null
         val mmkvAutofill = getAutofillMMKV(context)
-        val hdRootKeyId = mmkvAutofill.decodeString(CredentialRepository.HD_ROOT_KEY_ID_KEY) ?: throw IllegalStateException("HD Root Key ID not found. Ensure you have called setHdRootKeyId(id) from JavaScript.")
-        
+        val hdRootKeyId = mmkvAutofill.decodeString(CredentialRepository.HD_ROOT_KEY_ID_KEY) ?: return null
         val mmkvKeystore = getPasskeysMMKV(context)
-        val hdRootKeyPayload = mmkvKeystore.decodeString(hdRootKeyId) ?: throw IllegalStateException("HD Root Key not found in keystore for ID: $hdRootKeyId")
-        
-        val hdRootKeyData = decodeKeyData(hdRootKeyPayload, masterKey)
-        
+        val hdRootKeyPayload = mmkvKeystore.decodeString(hdRootKeyId) ?: return null
+        val hdRootKeyData = try {
+            decodeKeyData(hdRootKeyPayload, masterKey)
+        } catch (e: Exception) {
+            Log.w(CredentialRepository.TAG, "Failed to decode HD root key", e)
+            return null
+        }
+
         // In react-native-keystore, the private key/seed are stored as arrays of numbers in JSON
         // due to how JSON.stringify handles Uint8Array.
-        // Our decode method in decryptHdRootKey might have already handled it if it matched react-native-keystore's decode.
-        
         val seedArray = hdRootKeyData.optJSONArray("seed") ?: hdRootKeyData.optJSONArray("privateKey")
-        val derivedParentSecret = if (seedArray != null) {
-            Log.d(CredentialRepository.TAG, "Found seedArray in hdRootKeyData")
+        if (seedArray != null) {
             val bytes = ByteArray(seedArray.length())
             for (i in 0 until seedArray.length()) {
                 bytes[i] = seedArray.getInt(i).toByte()
             }
-            bytes
+            return bytes
+        }
+
+        val seed = (if (hdRootKeyData.has("seed")) hdRootKeyData.getString("seed") else null)
+            ?: (if (hdRootKeyData.has("privateKey")) hdRootKeyData.getString("privateKey") else null)
+            ?: return null
+        return if (seed.startsWith("0x")) {
+            hexToBytes(seed.substring(2))
         } else {
-            val seed = (if (hdRootKeyData.has("seed")) hdRootKeyData.getString("seed") else null)
-                ?: (if (hdRootKeyData.has("privateKey")) hdRootKeyData.getString("privateKey") else null)
-                ?: throw IllegalStateException("HD Root Key does not contain a seed or privateKey")
-            
-            Log.d(CredentialRepository.TAG, "Found seed string in hdRootKeyData")
-            if (seed.startsWith("0x")) {
-                hexToBytes(seed.substring(2))
-            } else {
-                // It might be base64url encoded or just hex
+            try {
+                hexToBytes(seed)
+            } catch (e: Exception) {
                 try {
-                    hexToBytes(seed)
-                } catch (e: Exception) {
                     AndroidBase64.decode(seed, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
+                } catch (e2: Exception) {
+                    null
                 }
             }
         }
-
-        return dP256.genDomainSpecificKeypair(derivedParentSecret, origin, userHandle.lowercase())
     }
 
     private fun encryptData(key: ByteArray, data: String): String {

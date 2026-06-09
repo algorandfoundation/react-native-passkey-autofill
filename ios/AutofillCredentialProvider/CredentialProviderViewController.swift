@@ -12,6 +12,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   private var pendingAssertionCredential: StoredPasskeyCredential?
   private var pendingAssertionClientDataHash: Data?
   private var pendingAssertionRelyingPartyIdentifier: String?
+  private var pendingAssertionPrfInput: PrfInput?
+  private var pendingRegistrationPrfInput: PrfInput?
   private var isCompletingRegistration = false
   private var isCompletingAssertion = false
   private var hasPresentedInterface = false
@@ -62,7 +64,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     prepareAssertion(
       credential: credential,
       clientDataHash: requestParameters.clientDataHash,
-      relyingPartyIdentifier: relyingPartyIdentifier
+      relyingPartyIdentifier: relyingPartyIdentifier,
+      prfInput: Self.prfInput(fromAssertion: requestParameters)
     )
   }
 
@@ -100,7 +103,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     prepareAssertion(
       credential: credential,
       clientDataHash: request.clientDataHash,
-      relyingPartyIdentifier: identity.relyingPartyIdentifier
+      relyingPartyIdentifier: identity.relyingPartyIdentifier,
+      prfInput: Self.prfInput(fromAssertion: request)
     )
   }
 
@@ -116,6 +120,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
     pendingRegistrationRequest = request
     pendingRegistrationIdentity = identity
+    pendingRegistrationPrfInput = Self.prfInput(fromRegistration: request)
     showCheckingPasskeys()
 
     if hasPresentedInterface {
@@ -182,6 +187,13 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         attestationObject: WebAuthn.attestationObject(authenticatorData: authData)
       )
 
+      attachPrfRegistrationOutput(
+        to: registrationCredential,
+        derivedParentSecret: derivedParentSecret,
+        relyingPartyIdentifier: identity.relyingPartyIdentifier,
+        userHandle: userHandle
+      )
+
       try store.save(storedCredential)
       store.appendDiagnostic("stored passkey credential")
 
@@ -223,6 +235,11 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         authenticatorData: authenticatorData,
         credentialID: credential.credentialIdData
       )
+      attachPrfAssertionOutput(
+        to: assertionCredential,
+        credential: credential,
+        relyingPartyIdentifier: relyingPartyIdentifier
+      )
       extensionContext.completeAssertionRequest(using: assertionCredential) { [weak self] _ in
         self?.store?.recordCredentialUsage(id: credential.credentialId)
         self?.authContext = nil
@@ -230,6 +247,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         self?.pendingAssertionCredential = nil
         self?.pendingAssertionClientDataHash = nil
         self?.pendingAssertionRelyingPartyIdentifier = nil
+        self?.pendingAssertionPrfInput = nil
       }
     } catch {
       isCompletingAssertion = false
@@ -240,11 +258,13 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   private func prepareAssertion(
     credential: StoredPasskeyCredential,
     clientDataHash: Data,
-    relyingPartyIdentifier: String
+    relyingPartyIdentifier: String,
+    prfInput: PrfInput?
   ) {
     pendingAssertionCredential = credential
     pendingAssertionClientDataHash = clientDataHash
     pendingAssertionRelyingPartyIdentifier = relyingPartyIdentifier
+    pendingAssertionPrfInput = prfInput
     showCheckingPasskeys()
 
     if hasPresentedInterface {
@@ -435,5 +455,114 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 private extension ASPasskeyCredentialIdentity {
   var userHandleString: String {
     String(data: userHandle, encoding: .utf8) ?? userHandle.base64URLEncodedString()
+  }
+}
+
+// MARK: - PRF extension helpers
+
+extension CredentialProviderViewController {
+  /// Extract PRF inputs from a passkey assertion request. The platform passes
+  /// the RP-supplied salts down to credential providers via `extensionInput`
+  /// (iOS 17.4+ for the type itself, iOS 18+ for the `prf` property).
+  static func prfInput(fromAssertion request: ASPasskeyCredentialRequest) -> PrfInput? {
+    if #available(iOSApplicationExtension 18.0, *) {
+      guard let prf = request.extensionInput?.prf else { return nil }
+      return prfInput(fromAssertionInput: prf)
+    }
+    return nil
+  }
+
+  /// Variant for the `prepareCredentialList` flow which gives us the
+  /// `ASPasskeyCredentialRequestParameters` directly.
+  static func prfInput(fromAssertion parameters: ASPasskeyCredentialRequestParameters) -> PrfInput? {
+    if #available(iOSApplicationExtension 18.0, *) {
+      guard let prf = parameters.extensionInput?.prf else { return nil }
+      return prfInput(fromAssertionInput: prf)
+    }
+    return nil
+  }
+
+  /// Extract PRF inputs from a passkey registration request. Most relying
+  /// parties only set `prf.enabled` on create, but a few also pass eval salts
+  /// to immediately derive a secret.
+  static func prfInput(fromRegistration request: ASPasskeyCredentialRequest) -> PrfInput? {
+    if #available(iOSApplicationExtension 18.0, *) {
+      guard let prf = request.extensionInput?.prf else { return nil }
+      return prfInput(fromRegistrationInput: prf)
+    }
+    return nil
+  }
+
+  @available(iOSApplicationExtension 18.0, *)
+  private static func prfInput(
+    fromAssertionInput prf: ASAuthorizationPublicKeyCredentialPRFAssertionInput
+  ) -> PrfInput? {
+    // `inputValues` (when present) overrides `saltInput1/2` per WebAuthn's
+    // `evalByCredential` semantics. The platform exposes whichever is
+    // applicable to the credential the user actually picked.
+    if let values = prf.inputValues {
+      return PrfInput(first: values.saltInput1, second: values.saltInput2)
+    }
+    return nil
+  }
+
+  @available(iOSApplicationExtension 18.0, *)
+  private static func prfInput(
+    fromRegistrationInput prf: ASAuthorizationPublicKeyCredentialPRFRegistrationInput
+  ) -> PrfInput? {
+    if let values = prf.inputValues {
+      return PrfInput(first: values.saltInput1, second: values.saltInput2)
+    }
+    return nil
+  }
+
+  /// Compute and attach PRF outputs to an assertion credential. No-op on
+  /// pre-iOS 18 systems, and a no-op when the RP did not supply PRF inputs.
+  func attachPrfAssertionOutput(
+    to assertionCredential: ASPasskeyAssertionCredential,
+    credential: StoredPasskeyCredential,
+    relyingPartyIdentifier: String
+  ) {
+    guard #available(iOSApplicationExtension 18.0, *),
+          let input = pendingAssertionPrfInput else { return }
+
+    do {
+      guard let store else { return }
+      let derivedParentSecret = try store.hdRootKeySecret()
+      let userHandle = credential.userHandle
+      let credRandom = Prf.credRandom(
+        hdRootSecret: derivedParentSecret,
+        relyingPartyIdentifier: relyingPartyIdentifier,
+        userHandle: userHandle
+      )
+      let first = Prf.evaluate(credRandom: credRandom, salt: input.first)
+      let second = input.second.map { Prf.evaluate(credRandom: credRandom, salt: $0) }
+      let prfOutput = ASAuthorizationPublicKeyCredentialPRFAssertionOutput(
+        first: first,
+        second: second
+      )
+      assertionCredential.extensionOutput = ASPasskeyAssertionCredentialExtensionOutput(prf: prfOutput)
+      store.appendDiagnostic("attached PRF assertion output")
+    } catch {
+      store?.appendDiagnostic("failed to attach PRF assertion output: \(error.localizedDescription)")
+    }
+  }
+
+  /// Attach PRF output to a registration credential.
+  ///
+  /// Per the agreed scope, we always advertise `prf.enabled = true` on
+  /// registration to signal the credential supports PRF. If the RP also sent
+  /// eval salts we still defer the actual evaluation to a follow-up assertion
+  /// (matching the behaviour of most platform authenticators).
+  func attachPrfRegistrationOutput(
+    to registrationCredential: ASPasskeyRegistrationCredential,
+    derivedParentSecret: Data,
+    relyingPartyIdentifier: String,
+    userHandle: String
+  ) {
+    guard #available(iOSApplicationExtension 18.0, *) else { return }
+    let prfOutput = ASAuthorizationPublicKeyCredentialPRFRegistrationOutput.supported()
+    registrationCredential.extensionOutput = ASPasskeyRegistrationCredentialExtensionOutput(prf: prfOutput)
+    store?.appendDiagnostic("attached PRF registration output (enabled)")
   }
 }

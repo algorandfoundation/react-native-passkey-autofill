@@ -1,3 +1,9 @@
+# [1.0.0-canary.18](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.17...v1.0.0-canary.18) (2026-06-09)
+
+### Features
+
+- PRF extension support for deterministically derived secrets ([4b5b05a](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/4b5b05ab146e39b191855ccb01fd4aca5ed32819))
+
 # [1.0.0-canary.17](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.16...v1.0.0-canary.17) (2026-05-28)
 
 ### Bug Fixes

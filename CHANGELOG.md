@@ -1,3 +1,9 @@
+# [1.0.0-canary.19](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.18...v1.0.0-canary.19) (2026-06-09)
+
+### Bug Fixes
+
+- **android:** credential repository filter types in getAllCredentials ([2b6523f](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/2b6523fc25aaadb5152b0b0d3d6b3a56e9de1759))
+
 # [1.0.0-canary.18](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.17...v1.0.0-canary.18) (2026-06-09)
 
 ### Features

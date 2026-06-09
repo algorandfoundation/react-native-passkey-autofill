@@ -166,11 +166,15 @@ class Repository() : CredentialRepository {
             val payload = mmkv.decodeString(key) ?: continue
             try {
                 val json = decodeKeyData(payload, masterKey)
-                // Basic validation to ensure it's a credential
+                // Only treat entries as passkey credentials that match p256
+                val keyType = json.optString("type", "")
+                if (keyType != "hd-derived-p256" && keyType != "xhd-derived-p256") {
+                    continue
+                }
                 if (json.has("id") && (json.has("origin") || json.has("metadata"))) {
                     val metadata = json.optJSONObject("metadata")
                     val encJson = json.optJSONObject("privateKeyEnc")
-                    
+
                     credentials.add(Credential(
                         credentialId = json.getString("id"),
                         origin = metadata?.optString("origin") ?: json.optString("origin", ""),

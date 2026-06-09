@@ -10,17 +10,12 @@ import { passkeysStore } from "./stores/passkeys";
  * This eventually will just be a part of the passkey extension.
  */
 export async function fullReload() {
-  /*
-        const _keys = storage.getAllKeys()
-        _keys.forEach((keyId) => {
-            const secret = storage.getString(keyId)
-        })
-    */
-
   const secrets = await Promise.all(
     storage
       .getAllKeys()
-      .map(async (keyId) => fetchSecret<KeyData>({ keyId, masterKey: await getMasterKey() })),
+      .map(async (keyId) =>
+        fetchSecret<KeyData>({ keyId, options: { masterKey: await getMasterKey() } }),
+      ),
   );
   const keys = secrets
     .filter((k) => k !== null)
@@ -44,7 +39,9 @@ export async function bootstrap() {
   const secrets = await Promise.all(
     storage
       .getAllKeys()
-      .map(async (keyId) => fetchSecret<KeyData>({ keyId, masterKey: await getMasterKey() })),
+      .map(async (keyId) =>
+        fetchSecret<KeyData>({ keyId, options: { masterKey: await getMasterKey() } }),
+      ),
   );
 
   const keys = secrets
@@ -71,16 +68,26 @@ export async function bootstrap() {
 async function syncNativePasskeys() {
   const credentials = await ReactNativePasskeyAutofill.getStoredCredentials();
   passkeysStore.setState((state) => {
+    // Index existing passkeys by id so updates collapse to a single entry.
     const existingById = new Map(state.passkeys.map((passkey) => [passkey.id, passkey]));
+
     for (const credential of credentials) {
       const id = credential.credentialId;
       const publicKey = credential.publicKey ?? credential.publicKeyBase64;
       if (!id || !publicKey) continue;
 
+      const publicKeyBytes = base64ToBytes(publicKey);
+
+      for (const [existingId, existing] of existingById) {
+        if (existingId !== id && publicKeysEqual(existing.publicKey, publicKeyBytes)) {
+          existingById.delete(existingId);
+        }
+      }
+
       existingById.set(id, {
         id,
         name: credential.userName ?? credential.relyingPartyIdentifier ?? "Unnamed Passkey",
-        publicKey: base64ToBytes(publicKey),
+        publicKey: publicKeyBytes,
         algorithm: "ES256",
         metadata: {
           origin: credential.relyingPartyIdentifier,
@@ -98,4 +105,12 @@ async function syncNativePasskeys() {
 
 function base64ToBytes(value: string): Uint8Array {
   return Uint8Array.from(Buffer.from(value.replace(/-/g, "+").replace(/_/g, "/"), "base64"));
+}
+
+function publicKeysEqual(a: Uint8Array | undefined, b: Uint8Array): boolean {
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }

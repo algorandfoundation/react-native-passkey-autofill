@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@algorandfoundation/keystore": "1.0.0-canary.15",
-    "@algorandfoundation/react-native-keystore": "1.0.0-canary.11",
+    "@algorandfoundation/react-native-keystore": "1.0.0-canary.12",
     "@algorandfoundation/react-native-passkey-autofill": "workspace:*",
     "@algorandfoundation/wallet-provider": "1.0.0-canary.5",
     "@noble/hashes": "^2.2.0",

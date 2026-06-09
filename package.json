@@ -48,7 +48,7 @@
     "e2e:ios": "start-server-and-test appium:start http-get://127.0.0.1:4723/status \"pnpm --filter @algorandfoundation/react-native-passkey-autofill-e2e run test:ios\""
   },
   "dependencies": {
-    "@algorandfoundation/react-native-keystore": "1.0.0-canary.11"
+    "@algorandfoundation/react-native-keystore": "1.0.0-canary.12"
   },
   "devDependencies": {
     "@expo/config-plugins": "~55.0.8",

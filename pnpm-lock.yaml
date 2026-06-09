@@ -45,8 +45,8 @@ importers:
   .:
     dependencies:
       '@algorandfoundation/react-native-keystore':
-        specifier: 1.0.0-canary.11
-        version: 1.0.0-canary.11(@tanstack/store@0.9.3)(before-after-hook@4.0.0)(expo@55.0.17)(react-native-nitro-modules@0.35.5(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native-quick-base64@2.2.2(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+        specifier: 1.0.0-canary.12
+        version: 1.0.0-canary.12(@tanstack/store@0.9.3)(before-after-hook@4.0.0)(expo@55.0.17)(react-native-nitro-modules@0.35.5(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native-quick-base64@2.2.2(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
     devDependencies:
       '@expo/config-plugins':
         specifier: ~55.0.8
@@ -147,8 +147,8 @@ importers:
         specifier: 1.0.0-canary.15
         version: 1.0.0-canary.15(@tanstack/store@0.9.3)(before-after-hook@4.0.0)
       '@algorandfoundation/react-native-keystore':
-        specifier: 1.0.0-canary.11
-        version: 1.0.0-canary.11(@tanstack/store@0.9.3)(before-after-hook@4.0.0)(expo@55.0.17)(react-native-nitro-modules@0.35.5(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native-quick-base64@2.2.2(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+        specifier: 1.0.0-canary.12
+        version: 1.0.0-canary.12(@tanstack/store@0.9.3)(before-after-hook@4.0.0)(expo@55.0.17)(react-native-nitro-modules@0.35.5(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native-quick-base64@2.2.2(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
       '@algorandfoundation/react-native-passkey-autofill':
         specifier: workspace:*
         version: link:..
@@ -253,8 +253,18 @@ packages:
       '@algorandfoundation/log-store':
         optional: true
 
-  '@algorandfoundation/react-native-keystore@1.0.0-canary.11':
-    resolution: {integrity: sha512-3LpZ1EaKOm0HimnEMNclmrRIrgGEAYChPZ+eM2bAaf3nsTcKj/67Rbwe0K+eaLwYXbuN2+guozrAGRM94Lq9aw==}
+  '@algorandfoundation/keystore@1.0.0-canary.16':
+    resolution: {integrity: sha512-nqimJI+L0InFRvtgy6x/kn/nvl5u2Cqa8J7hDC0j6xa8qnQepPcqv/ONtAPkp5y3i3AKB6XKZfDo9LO29n06OQ==}
+    peerDependencies:
+      '@algorandfoundation/log-store': 1.0.0-canary.3
+      '@tanstack/store': 0.9.3
+      before-after-hook: 4.0.0
+    peerDependenciesMeta:
+      '@algorandfoundation/log-store':
+        optional: true
+
+  '@algorandfoundation/react-native-keystore@1.0.0-canary.12':
+    resolution: {integrity: sha512-imCpcdI09mUE17jr/T7g0NhHzg4c23OHOF/kCl1medi2hRSCJ9HjdnW6IVQGNZj8c8NMjVF72GHBV5Z2Dz0ddw==}
     peerDependencies:
       '@algorandfoundation/log-store': 1.0.0-canary.3
       '@tanstack/store': 0.9.3
@@ -7441,10 +7451,21 @@ snapshots:
       '@tanstack/store': 0.9.3
       before-after-hook: 4.0.0
 
-  '@algorandfoundation/react-native-keystore@1.0.0-canary.11(@tanstack/store@0.9.3)(before-after-hook@4.0.0)(expo@55.0.17)(react-native-nitro-modules@0.35.5(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native-quick-base64@2.2.2(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)':
+  '@algorandfoundation/keystore@1.0.0-canary.16(@tanstack/store@0.9.3)(before-after-hook@4.0.0)':
     dependencies:
       '@algorandfoundation/dp256': 1.1.0
-      '@algorandfoundation/keystore': 1.0.0-canary.15(@tanstack/store@0.9.3)(before-after-hook@4.0.0)
+      '@algorandfoundation/wallet-provider': 1.0.0-canary.5
+      '@algorandfoundation/xhd-wallet-api': 2.0.0-canary.1
+      '@noble/hashes': 2.0.1
+      '@scure/base': 2.0.0
+      '@scure/bip39': 1.6.0
+      '@tanstack/store': 0.9.3
+      before-after-hook: 4.0.0
+
+  '@algorandfoundation/react-native-keystore@1.0.0-canary.12(@tanstack/store@0.9.3)(before-after-hook@4.0.0)(expo@55.0.17)(react-native-nitro-modules@0.35.5(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native-quick-base64@2.2.2(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)':
+    dependencies:
+      '@algorandfoundation/dp256': 1.1.0
+      '@algorandfoundation/keystore': 1.0.0-canary.16(@tanstack/store@0.9.3)(before-after-hook@4.0.0)
       '@algorandfoundation/wallet-provider': 1.0.0-canary.5
       '@algorandfoundation/xhd-wallet-api': 2.0.0-canary.1
       '@scure/base': 2.0.0

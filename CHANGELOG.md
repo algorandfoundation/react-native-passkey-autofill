@@ -1,3 +1,9 @@
+# [1.0.0-canary.20](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.19...v1.0.0-canary.20) (2026-06-10)
+
+### Bug Fixes
+
+- **Android:** improve setting intent handling, gradle includes pickFirst for MMKV. ([27af9e4](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/27af9e470fb2d53f375422b246e3f8d72329b2c0))
+
 # [1.0.0-canary.19](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.18...v1.0.0-canary.19) (2026-06-09)
 
 ### Bug Fixes

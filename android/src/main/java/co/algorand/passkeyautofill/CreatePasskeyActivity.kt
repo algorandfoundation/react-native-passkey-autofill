@@ -434,6 +434,49 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 }
             }
 
+            // Chrome's CredMan → Mojo converter requires `publicKeyAlgorithm` (and uses
+            // `publicKey`, `authenticatorData`, `transports`) on the
+            // AuthenticatorAttestationResponseJSON. The androidx
+            // `AuthenticatorAttestationResponse.json()` omits these, which causes
+            // Chrome to fail with: "field missing or invalid: publicKeyAlgorithm".
+            // Populate them explicitly here. We currently generate P-256 keys,
+            // matching COSE alg = -7 (ES256).
+            try {
+                respJson.put("publicKeyAlgorithm", -7)
+
+                // publicKey: SubjectPublicKeyInfo (X.509) of the credential public key, base64url
+                val spki = keyPair.public.encoded
+                if (spki != null) {
+                    val spkiB64 = AndroidBase64.encodeToString(
+                        spki,
+                        AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING
+                    )
+                    respJson.put("publicKey", spkiB64)
+                }
+
+                // authenticatorData: extract from CBOR attestationObject (map key "authData")
+                try {
+                    val attObjBytes = AndroidBase64.decode(
+                        respJson.getString("attestationObject"),
+                        AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP
+                    )
+                    val authData = WebAuthn.extractAuthData(attObjBytes)
+                    if (authData != null) {
+                        respJson.put(
+                            "authenticatorData",
+                            AndroidBase64.encodeToString(
+                                authData,
+                                AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to extract authenticatorData from attestationObject", e)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to enrich attestation response JSON", e)
+            }
+
             // WebAuthn `prf` extension (hmac-secret).
             // On registration we advertise `enabled = true` whenever the RP
             // asked for the extension, signalling that the credential can be

@@ -466,7 +466,8 @@ extension CredentialProviderViewController {
   /// (iOS 17.4+ for the type itself, iOS 18+ for the `prf` property).
   static func prfInput(fromAssertion request: ASPasskeyCredentialRequest) -> PrfInput? {
     if #available(iOSApplicationExtension 18.0, *) {
-      guard let prf = request.extensionInput?.prf else { return nil }
+      guard case let .assertion(input) = request.extensionInput,
+            let prf = input.prf else { return nil }
       return prfInput(fromAssertionInput: prf)
     }
     return nil
@@ -487,7 +488,8 @@ extension CredentialProviderViewController {
   /// to immediately derive a secret.
   static func prfInput(fromRegistration request: ASPasskeyCredentialRequest) -> PrfInput? {
     if #available(iOSApplicationExtension 18.0, *) {
-      guard let prf = request.extensionInput?.prf else { return nil }
+      guard case let .registration(input) = request.extensionInput,
+            let prf = input.prf else { return nil }
       return prfInput(fromRegistrationInput: prf)
     }
     return nil
@@ -535,8 +537,8 @@ extension CredentialProviderViewController {
         relyingPartyIdentifier: relyingPartyIdentifier,
         userHandle: userHandle
       )
-      let first = Prf.evaluate(credRandom: credRandom, salt: input.first)
-      let second = input.second.map { Prf.evaluate(credRandom: credRandom, salt: $0) }
+      let first = SymmetricKey(data: Prf.evaluate(credRandom: credRandom, salt: input.first))
+      let second = input.second.map { SymmetricKey(data: Prf.evaluate(credRandom: credRandom, salt: $0)) }
       let prfOutput = ASAuthorizationPublicKeyCredentialPRFAssertionOutput(
         first: first,
         second: second
@@ -561,7 +563,7 @@ extension CredentialProviderViewController {
     userHandle: String
   ) {
     guard #available(iOSApplicationExtension 18.0, *) else { return }
-    let prfOutput = ASAuthorizationPublicKeyCredentialPRFRegistrationOutput.supported()
+    let prfOutput = ASAuthorizationPublicKeyCredentialPRFRegistrationOutput.supported
     registrationCredential.extensionOutput = ASPasskeyRegistrationCredentialExtensionOutput(prf: prfOutput)
     store?.appendDiagnostic("attached PRF registration output (enabled)")
   }

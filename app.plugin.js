@@ -22,6 +22,7 @@ const IOS_EXTENSION_FILES = [
   "PasskeyCredentialStore.swift",
   "WebAuthn.swift",
   "BiometricRequirement.swift",
+  "Prf.swift",
 ];
 const IOS_EXTENSION_SOURCE_FILES = IOS_EXTENSION_FILES.filter((file) => !file.endsWith(".h"));
 const DETERMINISTIC_P256_PACKAGE_URL =

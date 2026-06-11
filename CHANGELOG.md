@@ -1,3 +1,10 @@
+# [1.0.0-canary.21](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.20...v1.0.0-canary.21) (2026-06-11)
+
+### Bug Fixes
+
+- check for quotes for the DEVELOPMENT_TEAM ([d4aa43d](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/d4aa43dc74c318f9ac8a4d2d4b761d30bb44d576))
+- fix missing prf file and target iOS 26 shapes ([150a161](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/150a1615b7e4588bea91bf3900f82f054c939276))
+
 # [1.0.0-canary.20](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.19...v1.0.0-canary.20) (2026-06-10)
 
 ### Bug Fixes

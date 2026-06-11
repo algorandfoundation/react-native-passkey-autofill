@@ -255,11 +255,13 @@ const withIosPasskeyAutofill = (config, props = {}) => {
     const project = config.modResults;
     const bundleIdentifier = `${getIosBundleIdentifier(config)}.PasskeyAutofillCredentialProvider`;
     const buildNumber = config.ios?.buildNumber || config.versionCode || "1";
-    const developmentTeam =
-      props.developmentTeam ||
-      props.appleTeamId ||
-      getDevelopmentTeam(project) ||
-      "$(DEVELOPMENT_TEAM)";
+    const rawDevelopmentTeam =
+      props.developmentTeam || props.appleTeamId || getDevelopmentTeam(project);
+    const developmentTeam = rawDevelopmentTeam
+      ? rawDevelopmentTeam.startsWith('"')
+        ? rawDevelopmentTeam
+        : `"${rawDevelopmentTeam}"`
+      : '"$(DEVELOPMENT_TEAM)"';
     let target =
       getExtensionTarget(project) ||
       project.addTarget(IOS_EXTENSION_NAME, "app_extension", IOS_EXTENSION_NAME, bundleIdentifier);

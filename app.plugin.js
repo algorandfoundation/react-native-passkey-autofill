@@ -155,6 +155,8 @@ const extensionInfoPlist = ({
   <string>$(PASSKEY_AUTOFILL_APP_GROUP)</string>
   <key>AppGroupIdentifier</key>
   <string>$(PASSKEY_AUTOFILL_APP_GROUP)</string>
+  <key>ReactNativePasskeyAutofillKeychainGroup</key>
+  <string>$(PASSKEY_AUTOFILL_KEYCHAIN_GROUP)</string>
 ${aaguid ? `  <key>ReactNativePasskeyAutofillAAGUID</key>\n  <string>${aaguid}</string>\n` : ""}  <key>${IOS_BIOMETRIC_INFO_PLIST_KEY}</key>
   <string>${biometricRequirement}</string>
   <key>NSFaceIDUsageDescription</key>
@@ -313,6 +315,7 @@ const withIosPasskeyAutofill = (config, props = {}) => {
         IPHONEOS_DEPLOYMENT_TARGET: "17.0",
         MARKETING_VERSION: `"${config.version || "1.0.0"}"`,
         PASSKEY_AUTOFILL_APP_GROUP: `"${appGroup}"`,
+        PASSKEY_AUTOFILL_KEYCHAIN_GROUP: `"${keychainGroup}"`,
         PRODUCT_BUNDLE_IDENTIFIER: `"${bundleIdentifier}"`,
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "PASSKEY_AUTOFILL_EXTENSION",
         HEADER_SEARCH_PATHS: [

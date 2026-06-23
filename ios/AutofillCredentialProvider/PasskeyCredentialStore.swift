@@ -35,6 +35,10 @@ final class PasskeyCredentialStore {
   static let defaultCreatePasskeyActionKey = "ReactNativePasskeyAutofillCreatePasskeyAction"
   static let defaultDiagnosticsKey = "ReactNativePasskeyAutofillDiagnostics"
   static let defaultDeletedCredentialIdsKey = "ReactNativePasskeyAutofillDeletedCredentialIds"
+  /// Info.plist key holding the keychain access-group *base* (without the team
+  /// prefix) shared by the app and the AutoFill extension. Injected by the
+  /// config plugin so the module stays team-agnostic.
+  static let keychainGroupInfoKey = "ReactNativePasskeyAutofillKeychainGroup"
 
   private let defaults: UserDefaults
   private let credentialKey: String
@@ -248,21 +252,124 @@ final class PasskeyCredentialStore {
     defaults.removeObject(forKey: Self.defaultHdRootKeyIdKey)
     defaults.removeObject(forKey: Self.defaultGetPasskeyActionKey)
     defaults.removeObject(forKey: Self.defaultCreatePasskeyActionKey)
+    if let query = masterKeyQuery() {
+      _ = SecItemDelete(query as CFDictionary)
+    }
   }
 
+  // MARK: - Master key (Keychain-backed)
+  //
+  // The master key is the KEK for the credential store and is read by *both*
+  // the app and the AutoFill extension. It is stored in the Keychain (encrypted
+  // at rest, hardware-backed) in a shared access group so both processes can
+  // read it — never in plaintext UserDefaults. Accessibility is
+  // `AfterFirstUnlockThisDeviceOnly`, NOT biometric: the extension must read the
+  // key to *enumerate* credentials before the user authenticates, so a
+  // biometric-gated item would break the AutoFill list. Biometric checks stay at
+  // the assertion step (`LAContext` in `CredentialProviderViewController`).
+
   func saveMasterKey(_ secret: Data) {
-    defaults.set(secret.base64URLEncodedString(), forKey: Self.defaultMasterKeyKey)
+    guard var query = masterKeyQuery() else { return }
+    // Upsert: drop any existing value, then add the new one.
+    _ = SecItemDelete(query as CFDictionary)
+    query[kSecValueData as String] = secret
+    query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    _ = SecItemAdd(query as CFDictionary, nil)
+    // Scrub any legacy plaintext copy now that the Keychain holds the key.
+    defaults.removeObject(forKey: Self.defaultMasterKeyKey)
   }
 
   func masterKey() -> Data? {
-    guard let secret = defaults.string(forKey: Self.defaultMasterKeyKey) else {
-      return nil
+    if var query = masterKeyQuery() {
+      query[kSecReturnData as String] = true
+      query[kSecMatchLimit as String] = kSecMatchLimitOne
+      var item: CFTypeRef?
+      if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+         let data = item as? Data
+      {
+        return data
+      }
     }
-    return Data(base64URLEncoded: secret) ?? Data(base64Encoded: secret)
+    // Migration: older builds stored the key as plaintext in the App Group
+    // UserDefaults. Move it into the Keychain (and scrub the plaintext) once.
+    if let legacy = defaults.string(forKey: Self.defaultMasterKeyKey),
+       let data = Data(base64URLEncoded: legacy) ?? Data(base64Encoded: legacy)
+    {
+      saveMasterKey(data)
+      return data
+    }
+    return nil
   }
 
   func isMasterKeyAvailable() -> Bool {
     masterKey() != nil
+  }
+
+  /// Base Keychain query identifying the shared master-key item. Returns `nil`
+  /// when the access group can't be resolved (no Info.plist group or no team
+  /// prefix), in which case the caller falls back / no-ops rather than writing
+  /// to the wrong place.
+  private func masterKeyQuery() -> [String: Any]? {
+    guard let accessGroup = masterKeyAccessGroup() else { return nil }
+    return [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: Self.defaultMasterKeyKey,
+      kSecAttrAccount as String: Self.defaultMasterKeyKey,
+      kSecAttrAccessGroup as String: accessGroup,
+    ]
+  }
+
+  /// The full keychain access group (`<TeamID>.<base>`). The base is injected by
+  /// the config plugin via Info.plist; the team prefix is resolved at runtime.
+  private func masterKeyAccessGroup() -> String? {
+    guard
+      let base = Bundle.main.object(forInfoDictionaryKey: Self.keychainGroupInfoKey) as? String,
+      let prefix = Self.keychainTeamPrefix()
+    else {
+      return nil
+    }
+    return prefix + base
+  }
+
+  private static var cachedTeamPrefix: String?
+
+  /// Resolves the app's keychain access-group team prefix (`<TeamID>.`) at
+  /// runtime by probing a throwaway Keychain item and reading back the group the
+  /// system assigns. Avoids hardcoding a team ID in a module shared across teams.
+  private static func keychainTeamPrefix() -> String? {
+    if let cached = cachedTeamPrefix {
+      return cached
+    }
+    let probeAccount = "ReactNativePasskeyAutofillTeamPrefixProbe"
+    let cleanup: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrAccount as String: probeAccount,
+    ]
+    _ = SecItemDelete(cleanup as CFDictionary)
+
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrAccount as String: probeAccount,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+      kSecValueData as String: Data(),
+      kSecReturnAttributes as String: true,
+    ]
+    var result: CFTypeRef?
+    let status = SecItemAdd(query as CFDictionary, &result)
+    defer { _ = SecItemDelete(cleanup as CFDictionary) }
+
+    guard
+      status == errSecSuccess,
+      let attributes = result as? [String: Any],
+      let accessGroup = attributes[kSecAttrAccessGroup as String] as? String,
+      let dotIndex = accessGroup.firstIndex(of: ".")
+    else {
+      return nil
+    }
+    // accessGroup is "<TeamID>.<something>"; keep through the first dot.
+    let prefix = String(accessGroup[...dotIndex])
+    cachedTeamPrefix = prefix
+    return prefix
   }
 
   func saveHdRootKeyId(_ id: String) {

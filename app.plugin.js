@@ -45,6 +45,12 @@ const getIosBundleIdentifier = (config) =>
 const getAppGroup = (config, props) =>
   props.appGroup || `group.${getIosBundleIdentifier(config)}.passkey-autofill`;
 
+// Keychain access-group *base* (without the `$(AppIdentifierPrefix)` team
+// prefix, which Xcode resolves at build time). Shared by the app and the
+// AutoFill extension so both can read the master key from the Keychain.
+const getKeychainGroup = (config, props) =>
+  props.keychainGroup || `${getIosBundleIdentifier(config)}.passkey-autofill`;
+
 const AAGUID_REGEX =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -186,7 +192,7 @@ ${supportedDomains.map((domain) => `      <string>${domain}</string>`).join("\n"
 </plist>
 `;
 
-const extensionEntitlementsPlist = ({ appGroup }) => `<?xml version="1.0" encoding="UTF-8"?>
+const extensionEntitlementsPlist = ({ appGroup, keychainGroup }) => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -195,6 +201,10 @@ const extensionEntitlementsPlist = ({ appGroup }) => `<?xml version="1.0" encodi
   <key>com.apple.security.application-groups</key>
   <array>
     <string>${appGroup}</string>
+  </array>
+  <key>keychain-access-groups</key>
+  <array>
+    <string>$(AppIdentifierPrefix)${keychainGroup}</string>
   </array>
 </dict>
 </plist>
@@ -206,12 +216,14 @@ const withIosPasskeyAutofill = (config, props = {}) => {
   const associatedDomain = getAssociatedDomain(site);
   const supportedDomains = props.supportedDomains || [associatedDomain];
   const appGroup = getAppGroup(config, props);
+  const keychainGroup = getKeychainGroup(config, props);
   const aaguid = getAaguid(props);
   const biometricRequirement = getBiometricRequirement(props);
 
   config = withInfoPlist(config, (config) => {
     config.modResults.ReactNativePasskeyAutofillAppGroup = appGroup;
     config.modResults.AppGroupIdentifier = appGroup;
+    config.modResults.ReactNativePasskeyAutofillKeychainGroup = keychainGroup;
     return config;
   });
 
@@ -225,6 +237,10 @@ const withIosPasskeyAutofill = (config, props = {}) => {
     const appGroups = new Set(config.modResults["com.apple.security.application-groups"] || []);
     appGroups.add(appGroup);
     config.modResults["com.apple.security.application-groups"] = [...appGroups];
+
+    const keychainGroups = new Set(config.modResults["keychain-access-groups"] || []);
+    keychainGroups.add(`$(AppIdentifierPrefix)${keychainGroup}`);
+    config.modResults["keychain-access-groups"] = [...keychainGroups];
     return config;
   });
 
@@ -246,7 +262,7 @@ const withIosPasskeyAutofill = (config, props = {}) => {
       );
       writePlist(
         path.join(extensionRoot, `${IOS_EXTENSION_NAME}.entitlements`),
-        extensionEntitlementsPlist({ appGroup }),
+        extensionEntitlementsPlist({ appGroup, keychainGroup }),
       );
       return config;
     },

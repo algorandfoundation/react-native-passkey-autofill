@@ -39,7 +39,7 @@ interface CredentialRepository {
     fun getPublicKeyFromKeyPair(keyPair: KeyPair?): ByteArray
     fun sign(keyPair: KeyPair, payload: ByteArray): ByteArray
     fun isMasterKeyAvailable(context: Context): Boolean
-    fun saveMasterKey(context: Context, secret: String)
+    fun saveMasterKey(context: Context, secret: ByteArray)
     fun saveHdRootKeyId(context: Context, id: String)
     fun getHdRootKeyId(context: Context): String?
     fun configureIntentActions(context: Context, getPasskeyAction: String, createPasskeyAction: String)
@@ -450,22 +450,11 @@ class Repository() : CredentialRepository {
         }
     }
 
-    override fun saveMasterKey(context: Context, secret: String) {
-        
-        // Convert hex string to bytes if it's a valid hex string of appropriate length
-        val keyBytes = try {
-            if ((secret.length == 64 || secret.length == 32) && secret.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
-                hexToBytes(secret.trim())
-            } else {
-                secret.toByteArray(Charsets.UTF_8)
-            }
-        } catch (e: Exception) {
-            secret.toByteArray(Charsets.UTF_8)
-        }
-
-        // Store in our separate Keychain for persistence
+    override fun saveMasterKey(context: Context, secret: ByteArray) {
+        // The master key arrives as raw bytes (the bridge no longer takes a hex
+        // String), so encrypt it straight into the Keychain.
         try {
-            encryptToKeychain(context, keyBytes)
+            encryptToKeychain(context, secret)
         } catch (e: Exception) {
             Log.e(CredentialRepository.TAG, "Failed to save master key to Keychain", e)
         }

@@ -16,7 +16,7 @@ public class ReactNativePasskeyAutofillModule: Module {
 
     Events("onPasskeyAdded", "onPasskeyAuthenticated")
 
-    AsyncFunction("setMasterKey") { (secret: String) in
+    AsyncFunction("setMasterKey") { (secret: Data) in
       guard let store = PasskeyCredentialStore() else {
         throw NSError(
           domain: "ReactNativePasskeyAutofill",

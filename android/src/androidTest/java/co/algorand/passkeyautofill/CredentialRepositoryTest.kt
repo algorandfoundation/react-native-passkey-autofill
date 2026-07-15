@@ -36,7 +36,7 @@ class CredentialRepositoryTest {
         )
 
         // We need a master key to save credentials in the current implementation
-        repository.saveMasterKey(context, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        repository.saveMasterKey(context, ByteArray(32) { it.toByte() })
         
         repository.saveCredential(context, credential)
 
@@ -48,7 +48,7 @@ class CredentialRepositoryTest {
 
     @Test
     fun testGetAllCredentials() {
-        repository.saveMasterKey(context, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        repository.saveMasterKey(context, ByteArray(32) { it.toByte() })
         
         val credential1 = Credential(
             credentialId = "id1",

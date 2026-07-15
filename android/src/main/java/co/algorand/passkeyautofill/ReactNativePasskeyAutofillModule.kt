@@ -45,7 +45,7 @@ class ReactNativePasskeyAutofillModule : Module() {
 
     Events("onPasskeyAdded", "onPasskeyAuthenticated")
 
-    AsyncFunction("setMasterKey") { secret: String ->
+    AsyncFunction("setMasterKey") { secret: ByteArray ->
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
       if (context != null) {
         credentialRepository.saveMasterKey(context, secret)

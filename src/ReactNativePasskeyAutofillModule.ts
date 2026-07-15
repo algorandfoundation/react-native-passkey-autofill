@@ -7,7 +7,13 @@ import {
 } from "./ReactNativePasskeyAutofill.types";
 
 declare class ReactNativePasskeyAutofillModule extends NativeModule<ReactNativePasskeyAutofillModuleEvents> {
-  setMasterKey(secret: string): Promise<void>;
+  /**
+   * Persists the keystore master key as **raw bytes**, so a non-zeroable hex
+   * string is never materialized in the JS heap (immutable JS strings can't be
+   * wiped and linger until GC). The caller should zero the `Uint8Array` after
+   * the promise resolves.
+   */
+  setMasterKey(secret: Uint8Array): Promise<void>;
   setHdRootKeyId(id: string): Promise<void>;
   getHdRootKeyId(): Promise<string | null>;
   configureIntentActions(getPasskeyAction: string, createPasskeyAction: string): Promise<void>;

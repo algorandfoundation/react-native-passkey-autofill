@@ -28,8 +28,9 @@ describe("ReactNativePasskeyAutofill", () => {
 
   it("should call setMasterKey", async () => {
     const mockModule = requireNativeModule("ReactNativePasskeyAutofill");
-    await ReactNativePasskeyAutofill.setMasterKey("secret");
-    expect(mockModule.setMasterKey).toHaveBeenCalledWith("secret");
+    const secret = new Uint8Array([1, 2, 3]);
+    await ReactNativePasskeyAutofill.setMasterKey(secret);
+    expect(mockModule.setMasterKey).toHaveBeenCalledWith(secret);
   });
 
   it("provides a no-op fallback on Android for iOS-only methods", async () => {

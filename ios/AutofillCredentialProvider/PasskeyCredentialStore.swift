@@ -250,8 +250,8 @@ final class PasskeyCredentialStore {
     defaults.removeObject(forKey: Self.defaultCreatePasskeyActionKey)
   }
 
-  func saveMasterKey(_ secret: String) {
-    defaults.set(Self.normalizeSecret(secret).base64URLEncodedString(), forKey: Self.defaultMasterKeyKey)
+  func saveMasterKey(_ secret: Data) {
+    defaults.set(secret.base64URLEncodedString(), forKey: Self.defaultMasterKeyKey)
   }
 
   func masterKey() -> Data? {
@@ -358,17 +358,6 @@ final class PasskeyCredentialStore {
         }
       }
     }
-  }
-
-  private static func normalizeSecret(_ secret: String) -> Data {
-    let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.count % 2 == 0,
-       trimmed.allSatisfy({ $0.isHexDigit }),
-       let data = Data(hex: trimmed)
-    {
-      return data
-    }
-    return Data(trimmed.utf8)
   }
 
   private func credentialIdCandidates(_ id: String) -> Set<String> {

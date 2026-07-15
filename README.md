@@ -103,7 +103,7 @@ For iOS integration, make sure that:
 At runtime, the app must provide the native side with the master key, identify the HD root key stored in MMKV, and keep the iOS identity store in sync:
 
 ```typescript
-await ReactNativePasskeyAutofill.setMasterKey(masterKeyHex);
+await ReactNativePasskeyAutofill.setMasterKey(masterKeyBytes);
 await ReactNativePasskeyAutofill.setHdRootKeyId(hdRootKeyId);
 await ReactNativePasskeyAutofill.refreshCredentialIdentities();
 ```
@@ -115,8 +115,9 @@ Call `refreshCredentialIdentities()` after creating, importing, deleting, or res
 ```typescript
 import ReactNativePasskeyAutofill from "@algorandfoundation/react-native-passkey-autofill";
 
-// 1. Set the master key for encryption (hex string)
-await ReactNativePasskeyAutofill.setMasterKey(masterKeyHex);
+// 1. Set the master key for encryption (raw bytes — never a hex string, so
+//    the secret isn't materialized as a non-zeroable JS string)
+await ReactNativePasskeyAutofill.setMasterKey(masterKeyBytes);
 
 // 2. Set the HD root key ID if applicable
 await ReactNativePasskeyAutofill.setHdRootKeyId(hdRootKeyId);

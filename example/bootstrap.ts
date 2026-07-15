@@ -30,8 +30,9 @@ export async function bootstrap() {
   // Configure Autofill
   const masterKey = await getMasterKey();
 
-  // Set master key in native side BEFORE reloading
-  await ReactNativePasskeyAutofill.setMasterKey(masterKey.toString("hex"));
+  // Set master key in native side BEFORE reloading. Pass the raw bytes (not a
+  // hex string) so the secret never becomes a non-zeroable JS string.
+  await ReactNativePasskeyAutofill.setMasterKey(Uint8Array.from(masterKey));
 
   // Reload keys into the JS store
   await fullReload();

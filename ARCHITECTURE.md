@@ -58,7 +58,7 @@ The iOS part is implemented using Swift.
 
 The following methods are exposed to the JavaScript layer:
 
-- `setMasterKey(secret: string)`: Sets the master key for credential encryption/decryption.
+- `setMasterKey(secret: Uint8Array)`: Sets the master key for credential encryption/decryption. Takes raw bytes (not a hex string) so the secret never becomes a non-zeroable JS string.
 - `setHdRootKeyId(id: string)`: Sets the ID for the HD root key.
 - `getHdRootKeyId()`: Retrieves the current HD root key ID.
 - `configureIntentActions(getPasskeyAction: string, createPasskeyAction: string)`: Configures the intent actions used for Passkey flows.

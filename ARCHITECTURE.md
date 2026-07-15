@@ -68,7 +68,7 @@ The following methods are exposed to the JavaScript layer:
 
 ## Security Considerations
 
-As this module handles sensitive information (Passkeys), it is crucial to ensure that keys and secrets are handled securely in the native layers. Master keys should be stored in secure storage (like Android Keystore or iOS Keychain).
+As this module handles sensitive information (Passkeys), keys and secrets are handled securely in the native layers. The master key is stored in platform secure storage — never in plaintext: on Android it is AES/GCM-encrypted under the AndroidKeyStore, and on iOS it is held in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) within a shared keychain access group so the app and the AutoFill extension can both read it. It is deliberately not biometric-gated, because the extension must read it to enumerate credentials before the user authenticates; biometric verification is applied at the assertion step instead. The master key crosses the JS↔native bridge as raw bytes (`Uint8Array`), never as a hex string.
 
 ## End-to-End Tests
 

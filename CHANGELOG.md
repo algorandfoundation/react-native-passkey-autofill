@@ -1,3 +1,14 @@
+# [1.0.0-canary.22](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.21...v1.0.0-canary.22) (2026-07-15)
+
+### Bug Fixes
+
+- write keychain group into the extension Info.plist so the extension can resolve it ([a98ea08](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/a98ea0827164b5402a3f530579cd6908e52c0242))
+
+### Features
+
+- accept the master key as raw bytes instead of a hex string ([86f85a8](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/86f85a8667489f938266188f7551598c3e14cc0c))
+- store the iOS master key in the Keychain instead of plaintext UserDefaults ([00dd362](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/00dd362d7214e91296982e012aedd817b09ab83d))
+
 # [1.0.0-canary.21](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.20...v1.0.0-canary.21) (2026-06-11)
 
 ### Bug Fixes

@@ -27,6 +27,29 @@ public class ReactNativePasskeyAutofillModule: Module {
       store.saveMasterKey(secret)
     }
 
+    // Points the passkey hierarchy at the wallet's deterministic-P256 main key.
+    // The scheme is not a parameter: it is read from the record's own metadata, so
+    // a wallet cannot mislabel which hierarchy it handed us.
+    AsyncFunction("setMainKeyId") { (id: String) in
+      guard let store = PasskeyCredentialStore() else {
+        throw NSError(
+          domain: "ReactNativePasskeyAutofill",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "App Group is not configured for passkey autofill."]
+        )
+      }
+      store.saveMainKeyId(id)
+    }
+
+    AsyncFunction("getMainKeyId") { () -> String? in
+      guard let store = PasskeyCredentialStore() else {
+        return nil
+      }
+      return store.mainKeyId()
+    }
+
+    // Deprecated aliases of the two above, kept because installed wallets still
+    // call them. They address the same slot — see `saveMainKeyId`.
     AsyncFunction("setHdRootKeyId") { (id: String) in
       guard let store = PasskeyCredentialStore() else {
         throw NSError(
@@ -35,14 +58,14 @@ public class ReactNativePasskeyAutofillModule: Module {
           userInfo: [NSLocalizedDescriptionKey: "App Group is not configured for passkey autofill."]
         )
       }
-      store.saveHdRootKeyId(id)
+      store.saveMainKeyId(id)
     }
 
     AsyncFunction("getHdRootKeyId") { () -> String? in
       guard let store = PasskeyCredentialStore() else {
         return nil
       }
-      return store.hdRootKeyId()
+      return store.mainKeyId()
     }
 
     AsyncFunction("clearCredentials") {
@@ -111,7 +134,12 @@ public class ReactNativePasskeyAutofillModule: Module {
           publicKey: credential["publicKey"] as? String ?? credential["publicKeyBase64"] as? String,
           createdAt: credential["createdAt"] as? Double ?? Date().timeIntervalSince1970,
           lastUsedAt: credential["lastUsedAt"] as? Double ?? metadata?["lastUsedAt"] as? Double,
-          parentKeyId: credential["parentKeyId"] as? String ?? metadata?["parentKeyId"] as? String
+          parentKeyId: credential["parentKeyId"] as? String ?? metadata?["parentKeyId"] as? String,
+          // A wallet inserting a credential it derived itself says which root it
+          // used; absent, the credential reads back as pinned to the legacy
+          // BIP32-Ed25519 root.
+          derivationScheme: credential["derivationScheme"] as? String
+            ?? metadata?["scheme"] as? String
         )
       }
 
@@ -153,6 +181,9 @@ public class ReactNativePasskeyAutofillModule: Module {
         }
         if let parentKeyId = credential.parentKeyId {
           result["parentKeyId"] = parentKeyId
+        }
+        if let derivationScheme = credential.derivationScheme {
+          result["derivationScheme"] = derivationScheme
         }
 
         return result

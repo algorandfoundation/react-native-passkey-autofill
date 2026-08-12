@@ -153,11 +153,14 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         return
       }
 
-      let parentKeyId = store.hdRootKeyId()
-      let derivedParentSecret = try store.hdRootKeySecret()
+      // No requested scheme: a new credential takes the preferred parent (the
+      // wallet's deterministic-P256 main key) and records which one it got, so
+      // every later assertion re-derives the same key.
+      let parent = try store.parentSecret()
+      let parentKeyId = parent.keyId
       let userHandle = identity.userHandleString
       let privateKey = try Self.domainSpecificKeyPair(
-        derivedParentSecret: derivedParentSecret,
+        derivedParentSecret: parent.bytes,
         origin: identity.relyingPartyIdentifier,
         userHandle: userHandle.lowercased()
       )
@@ -172,7 +175,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         publicKey: publicKey.base64EncodedString(),
         createdAt: Date().timeIntervalSince1970,
         lastUsedAt: nil,
-        parentKeyId: parentKeyId
+        parentKeyId: parentKeyId,
+        derivationScheme: parent.scheme
       )
 
       let authData = try WebAuthn.authenticatorDataForAttestation(
@@ -530,10 +534,15 @@ extension CredentialProviderViewController {
 
     do {
       guard let store else { return }
-      let derivedParentSecret = try store.hdRootKeySecret()
+      // PRF is recomputed from the parent secret on EVERY assertion, so it must
+      // use the very parent this credential was created against — an unstamped
+      // credential predates the dp256 main key and is pinned to the BIP32 root.
+      let parent = try store.parentSecret(
+        scheme: credential.derivationScheme ?? PasskeyKeystoreRecords.schemeBip32Ed25519
+      )
       let userHandle = credential.userHandle
       let credRandom = Prf.credRandom(
-        hdRootSecret: derivedParentSecret,
+        hdRootSecret: parent.bytes,
         relyingPartyIdentifier: relyingPartyIdentifier,
         userHandle: userHandle
       )

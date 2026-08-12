@@ -18,7 +18,7 @@ The module provides an interface to interact with native Passkey AutoFill capabi
 ### TypeScript Layer (`src/`)
 
 - `index.ts`: The entry point for the module, re-exporting the native module.
-- `ReactNativePasskeyAutofillModule.ts`: Defines the `ReactNativePasskeyAutofillModule` class and its methods (`setMasterKey`, `setHdRootKeyId`, `getHdRootKeyId`, etc.).
+- `ReactNativePasskeyAutofillModule.ts`: Defines the `ReactNativePasskeyAutofillModule` class and its methods (`setMasterKey`, `setMainKeyId`, `getMainKeyId`, etc.).
 - `ReactNativePasskeyAutofill.types.ts`: Defines types and interfaces used by the module.
 
 ### Android Implementation (`android/`)
@@ -59,8 +59,8 @@ The iOS part is implemented using Swift.
 The following methods are exposed to the JavaScript layer:
 
 - `setMasterKey(secret: Uint8Array)`: Sets the master key for credential encryption/decryption. Takes raw bytes (not a hex string) so the secret never becomes a non-zeroable JS string.
-- `setHdRootKeyId(id: string)`: Sets the ID for the HD root key.
-- `getHdRootKeyId()`: Retrieves the current HD root key ID.
+- `setMainKeyId(id: string)`: Sets the ID for the P-256 main key (the parent secret for passkey derivation). The legacy `setHdRootKeyId` remains as a deprecated alias.
+- `getMainKeyId()`: Retrieves the current P-256 main key ID.
 - `configureIntentActions(getPasskeyAction: string, createPasskeyAction: string)`: Configures the intent actions used for Passkey flows.
 - `clearCredentials()`: Clears all stored credentials.
 - `isProviderActive()`: Returns `true` if this app is the user-selected system credential/autofill provider. Uses Android's `Settings.Secure("credential_service"[_primary])` (API 34+) and iOS's `ASCredentialIdentityStore.getState`. Useful both for gating passkey UI at runtime and for E2E tests, which need to confirm that an OS passkey prompt is served by _this_ provider rather than any other installed one.

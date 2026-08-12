@@ -14,7 +14,19 @@ declare class ReactNativePasskeyAutofillModule extends NativeModule<ReactNativeP
    * the promise resolves.
    */
   setMasterKey(secret: Uint8Array): Promise<void>;
+  /**
+   * Sets the ID of the keystore record to use as the parent secret for passkey
+   * derivation. The record must be a deterministic-P256 main key (64 bytes).
+   */
+  setMainKeyId(id: string): Promise<void>;
+  /**
+   * Returns the ID of the keystore record currently used as the parent secret
+   * for passkey derivation.
+   */
+  getMainKeyId(): Promise<string | null>;
+  /** @deprecated use {@link setMainKeyId} */
   setHdRootKeyId(id: string): Promise<void>;
+  /** @deprecated use {@link getMainKeyId} */
   getHdRootKeyId(): Promise<string | null>;
   configureIntentActions(getPasskeyAction: string, createPasskeyAction: string): Promise<void>;
   clearCredentials(): Promise<void>;

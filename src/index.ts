@@ -2,3 +2,4 @@
 // and on native platforms to ReactNativePasskeyAutofillModule.ts
 export { default } from "./ReactNativePasskeyAutofillModule";
 export * from "./ReactNativePasskeyAutofill.types";
+export * from "./PasskeyDerivation";

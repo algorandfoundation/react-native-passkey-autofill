@@ -19,6 +19,17 @@ export type PasskeyAutofillCredentialIdentity = {
   createdAt?: number;
   lastUsedAt?: number;
   parentKeyId?: string;
+  /**
+   * The version of the identity derivation logic used for this credential.
+   * Pinned for the life of the credential.
+   */
+  derivationVersion?: number;
+  /**
+   * The scheme the passkey key was derived from. Absent means "bip32-ed25519".
+   * Pinned for the life of the credential — changing it changes the secret
+   * every relying party is bound to.
+   */
+  derivationScheme?: string;
 };
 
 /**
@@ -30,8 +41,9 @@ export type PasskeyAutofillCapabilities = {
   /**
    * Whether the WebAuthn `prf` extension (a.k.a. `hmac-secret`) is supported
    * by this credential provider. PRF outputs are derived deterministically
-   * from the wallet HD root secret so that restoring the wallet seed
-   * reproduces the same secrets on another device.
+   * from the wallet's parent secret (the P-256 main key or legacy HD root)
+   * so that restoring the wallet seed reproduces the same secrets on another
+   * device.
    */
   prf: boolean;
 };

@@ -1,3 +1,9 @@
+# [1.0.0-canary.24](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.23...v1.0.0-canary.24) (2026-08-13)
+
+### Bug Fixes
+
+- update vendored keystore packages ([4ae89a7](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/4ae89a704074ba0703bd264dd5f446b19e4cc1a2))
+
 # [1.0.0-canary.23](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.22...v1.0.0-canary.23) (2026-08-13)
 
 ### Features

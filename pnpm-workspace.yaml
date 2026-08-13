@@ -13,6 +13,7 @@ minimumReleaseAgeExclude:
   - "@algorandfoundation/wallet-provider"
   - "@algorandfoundation/react-native-keystore"
   - "@algorandfoundation/keystore"
+  - "@algorandfoundation/keystore-core"
   - "@typescript-eslint/types"
   - "@typescript-eslint/visitor-keys"
   - "react-native-nitro-modules"

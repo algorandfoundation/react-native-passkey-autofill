@@ -1,5 +1,7 @@
 const mockModule: Record<string, jest.Mock> = {
   setMasterKey: jest.fn(),
+  setMainKeyId: jest.fn(),
+  getMainKeyId: jest.fn(),
   setHdRootKeyId: jest.fn(),
   getHdRootKeyId: jest.fn(),
   configureIntentActions: jest.fn(),
@@ -31,6 +33,34 @@ describe("ReactNativePasskeyAutofill", () => {
     const secret = new Uint8Array([1, 2, 3]);
     await ReactNativePasskeyAutofill.setMasterKey(secret);
     expect(mockModule.setMasterKey).toHaveBeenCalledWith(secret);
+  });
+
+  it("should call setMainKeyId", async () => {
+    const mockModule = requireNativeModule("ReactNativePasskeyAutofill");
+    await ReactNativePasskeyAutofill.setMainKeyId("test-id");
+    expect(mockModule.setMainKeyId).toHaveBeenCalledWith("test-id");
+  });
+
+  it("should call getMainKeyId", async () => {
+    const mockModule = requireNativeModule("ReactNativePasskeyAutofill");
+    mockModule.getMainKeyId.mockResolvedValue("test-id");
+    const result = await ReactNativePasskeyAutofill.getMainKeyId();
+    expect(result).toBe("test-id");
+    expect(mockModule.getMainKeyId).toHaveBeenCalled();
+  });
+
+  it("should call setHdRootKeyId (deprecated)", async () => {
+    const mockModule = requireNativeModule("ReactNativePasskeyAutofill");
+    await ReactNativePasskeyAutofill.setHdRootKeyId("test-id");
+    expect(mockModule.setHdRootKeyId).toHaveBeenCalledWith("test-id");
+  });
+
+  it("should call getHdRootKeyId (deprecated)", async () => {
+    const mockModule = requireNativeModule("ReactNativePasskeyAutofill");
+    mockModule.getHdRootKeyId.mockResolvedValue("test-id");
+    const result = await ReactNativePasskeyAutofill.getHdRootKeyId();
+    expect(result).toBe("test-id");
+    expect(mockModule.getHdRootKeyId).toHaveBeenCalled();
   });
 
   it("provides a no-op fallback on Android for iOS-only methods", async () => {

@@ -342,7 +342,12 @@ class CreatePasskeyActivity : AppCompatActivity() {
             }
 
             Log.d(TAG, "Creating deterministic key pair")
-            val keyPair: KeyPair = credentialRepository.createDeterministicKeyPair(this@CreatePasskeyActivity, origin, userHandle)
+            // No requested scheme: a new credential takes the preferred parent
+            // (the wallet's deterministic-P256 main key), and records which one
+            // it got so every later assertion re-derives the same key.
+            val derived = credentialRepository.createDomainKeyPair(this@CreatePasskeyActivity, origin, userHandle)
+            val keyPair: KeyPair = derived.keyPair
+            Log.d(TAG, "Derived from parent ${derived.parentKeyId} (${derived.derivationScheme})")
             Log.d(TAG, "Generating credential ID")
             val credentialId = credentialRepository.generateCredentialId(keyPair)
             val credentialIdBase64 = AndroidBase64.encodeToString(credentialId, AndroidBase64.NO_WRAP)
@@ -354,7 +359,9 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 userId = userId,
                 publicKey = AndroidBase64.encodeToString(keyPair.public.encoded, AndroidBase64.NO_WRAP),
                 privateKey = AndroidBase64.encodeToString(keyPair.private.encoded, AndroidBase64.NO_WRAP),
-                count = 0
+                count = 0,
+                parentKeyId = derived.parentKeyId,
+                derivationScheme = derived.derivationScheme
             )
             
             Log.d(TAG, "Saving credential to repository")

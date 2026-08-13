@@ -8,9 +8,25 @@ enum PasskeyCredentialStoreError: Error {
   case credentialNotFound
   case credentialEncodingFailed
   case credentialStorageFailed
+  /// The wallet has not shared its master key with this process yet.
+  case masterKeyUnavailable
+  /// No record roots the requested scheme (the wallet never called `setMainKeyId`,
+  /// or it holds no key of that scheme).
+  case parentKeyUnavailable(String?)
+  /// The parent record exists but its material is missing or undecodable.
+  case parentMaterialUnavailable(String)
+  @available(*, deprecated, message: "Use the three specific parent-secret cases")
   case hdRootKeyUnavailable
   case invalidPrivateKey
   case signingFailed
+}
+
+/// The parent secret a credential's deterministic material hangs off, with the
+/// record it came from and the scheme it roots.
+struct PasskeyParentSecret {
+  let keyId: String
+  let scheme: String
+  let bytes: Data
 }
 
 struct StoredPasskeyCredential: Codable {
@@ -23,6 +39,72 @@ struct StoredPasskeyCredential: Codable {
   let createdAt: Double
   let lastUsedAt: Double?
   let parentKeyId: String?
+  /// The derivation scheme this credential is pinned to for life
+  /// (`PasskeyKeystoreRecords.schemePbkdf2P256` or `.schemeBip32Ed25519`).
+  ///
+  /// `nil` on every credential created before the wallet exposed its
+  /// deterministic-P256 main key, and those all derive from the BIP32-Ed25519
+  /// root — re-deriving one against a different parent produces a different key
+  /// and silently breaks the passkey the relying party already trusts.
+  var derivationScheme: String? = nil
+}
+
+/// The on-disk record format shared with the wallet's
+/// `@algorandfoundation/react-native-keystore` MMKV instance.
+///
+/// The keystore splits every key into two entries: `k/<id>` holds PLAINTEXT
+/// `Key` metadata (no material) and `m/<id>` holds the sealed raw material,
+/// whose sealed plaintext is exactly `base64(bytes)` rather than a JSON
+/// document. Records written before the split are a single entry keyed by the
+/// bare id, sealing `base64url(JSON.stringify(KeyData))` — metadata and material
+/// together. Both layouts must stay readable.
+///
+/// Kept byte-for-byte in step with `credentials/KeystoreRecords.kt` on Android.
+enum PasskeyKeystoreRecords {
+  /// Prefix for plaintext `Key` metadata records.
+  static let metadataPrefix = "k/"
+
+  /// Prefix for sealed raw-material records.
+  static let materialPrefix = "m/"
+
+  /// The type shared by both roots of the wallet's hierarchy; only the scheme
+  /// tells them apart.
+  static let typeHdRootKey = "hd-root-key"
+
+  /// The deterministic-P256 main key (PBKDF2-HMAC-SHA512, 64 bytes): the root the
+  /// passkey hierarchy is defined against, and the preferred parent for new keys.
+  static let schemePbkdf2P256 = "pbkdf2-p256"
+
+  /// The BIP32-Ed25519 account root (96 bytes). Passkeys used to derive from it
+  /// because it was the only root a wallet exposed, so credentials created then
+  /// stay pinned to it.
+  static let schemeBip32Ed25519 = "bip32-ed25519"
+
+  static func metadataKey(_ id: String) -> String { metadataPrefix + id }
+
+  static func materialKey(_ id: String) -> String { materialPrefix + id }
+
+  /// The scheme a decoded root record roots. Records written before the flag
+  /// existed have none, and every one of those is a BIP32-Ed25519 root.
+  static func scheme(of record: [String: Any]) -> String {
+    let metadata = record["metadata"] as? [String: Any]
+    if let scheme = metadata?["scheme"] as? String, !scheme.isEmpty { return scheme }
+    if let scheme = record["scheme"] as? String, !scheme.isEmpty { return scheme }
+    return schemeBip32Ed25519
+  }
+
+  /// Picks the parent record to derive from: the one rooting `requestedScheme`,
+  /// or — for a new credential, which requests none — the main key if there is
+  /// one, falling back to the most authoritative candidate.
+  static func selectParentKey(
+    candidates: [(keyId: String, scheme: String)],
+    requestedScheme: String?
+  ) -> (keyId: String, scheme: String)? {
+    if let requestedScheme {
+      return candidates.first { $0.scheme == requestedScheme }
+    }
+    return candidates.first { $0.scheme == schemePbkdf2P256 } ?? candidates.first
+  }
 }
 
 final class PasskeyCredentialStore {
@@ -30,6 +112,11 @@ final class PasskeyCredentialStore {
   static let legacyCredentialKey = "ReactNativePasskeyAutofillCredentials"
   static let defaultCredentialKey = "ReactNativePasskeyAutofillCredentialsV2"
   static let defaultMasterKeyKey = "ReactNativePasskeyAutofillMasterKey"
+  /// Points at the record whose material is the passkey parent secret. Its
+  /// predecessor `defaultHdRootKeyIdKey` named the wallet's BIP32-Ed25519 root;
+  /// the slot was renamed rather than reused so a wallet that still writes the
+  /// old one is not mistaken for one that opted into the dp256 main key.
+  static let defaultMainKeyIdKey = "ReactNativePasskeyAutofillMainKeyId"
   static let defaultHdRootKeyIdKey = "ReactNativePasskeyAutofillHdRootKeyId"
   static let defaultGetPasskeyActionKey = "ReactNativePasskeyAutofillGetPasskeyAction"
   static let defaultCreatePasskeyActionKey = "ReactNativePasskeyAutofillCreatePasskeyAction"
@@ -164,7 +251,8 @@ final class PasskeyCredentialStore {
         publicKey: publicKey.base64EncodedString(),
         createdAt: metadata?["createdAt"] as? Double ?? Date().timeIntervalSince1970,
         lastUsedAt: metadata?["lastUsedAt"] as? Double,
-        parentKeyId: parentKeyId
+        parentKeyId: parentKeyId,
+        derivationScheme: metadata?["scheme"] as? String
       )
     }
   }
@@ -195,8 +283,13 @@ final class PasskeyCredentialStore {
     if let lastUsedAt = credential.lastUsedAt {
       metadata["lastUsedAt"] = lastUsedAt
     }
-    if let parentKeyId = credential.parentKeyId ?? hdRootKeyId() {
+    if let parentKeyId = credential.parentKeyId ?? mainKeyId() {
       metadata["parentKeyId"] = parentKeyId
+    }
+    // Pin the parent this key was derived from, so a later assertion re-derives
+    // against the same root even once the wallet points us at a different one.
+    if let derivationScheme = credential.derivationScheme {
+      metadata["scheme"] = derivationScheme
     }
 
     let keyData: [String: Any] = [
@@ -249,6 +342,7 @@ final class PasskeyCredentialStore {
     defaults.removeObject(forKey: Self.legacyCredentialKey)
     defaults.removeObject(forKey: Self.defaultDeletedCredentialIdsKey)
     defaults.removeObject(forKey: Self.defaultMasterKeyKey)
+    defaults.removeObject(forKey: Self.defaultMainKeyIdKey)
     defaults.removeObject(forKey: Self.defaultHdRootKeyIdKey)
     defaults.removeObject(forKey: Self.defaultGetPasskeyActionKey)
     defaults.removeObject(forKey: Self.defaultCreatePasskeyActionKey)
@@ -372,33 +466,143 @@ final class PasskeyCredentialStore {
     return prefix
   }
 
+  /// Records which key store record the passkey hierarchy derives from — the
+  /// wallet's deterministic-P256 main key. The scheme is deliberately not part of
+  /// this call: it is read from the record's own metadata, so a wallet cannot
+  /// mislabel it.
+  func saveMainKeyId(_ id: String) {
+    defaults.set(id, forKey: Self.defaultMainKeyIdKey)
+  }
+
+  func mainKeyId() -> String? {
+    defaults.string(forKey: Self.defaultMainKeyIdKey)
+      ?? defaults.string(forKey: Self.defaultHdRootKeyIdKey)
+  }
+
+  /// Writes the same slot as `saveMainKeyId`: which setter a wallet happens to
+  /// call says nothing about the record.
+  @available(*, deprecated, message: "The passkey parent is no longer the BIP32-Ed25519 root")
   func saveHdRootKeyId(_ id: String) {
-    defaults.set(id, forKey: Self.defaultHdRootKeyIdKey)
+    saveMainKeyId(id)
   }
 
+  @available(*, deprecated, message: "The passkey parent is no longer the BIP32-Ed25519 root")
   func hdRootKeyId() -> String? {
-    defaults.string(forKey: Self.defaultHdRootKeyIdKey)
+    mainKeyId()
   }
 
-  func hdRootKeySecret() throws -> Data {
-    guard let masterKey = masterKey(),
-          let hdRootKeyId = hdRootKeyId(),
-          let appGroup = Bundle.main.object(forInfoDictionaryKey: Self.defaultSuiteNameKey) as? String,
-          let payload = try? PasskeyKeystoreMMKV.string(forKey: hdRootKeyId, appGroup: appGroup)
+  /// Resolves the parent secret the deterministic P-256 key and the PRF
+  /// `credRandom` are derived from.
+  ///
+  /// - Parameter scheme: the scheme a credential is pinned to, or `nil` for a new
+  ///   credential, which then takes the preferred (dp256 main key) parent.
+  func parentSecret(scheme: String? = nil) throws -> PasskeyParentSecret {
+    guard let masterKey = masterKey() else {
+      throw PasskeyCredentialStoreError.masterKeyUnavailable
+    }
+    guard let appGroup = Bundle.main.object(forInfoDictionaryKey: Self.defaultSuiteNameKey) as? String
     else {
-      throw PasskeyCredentialStoreError.hdRootKeyUnavailable
+      throw PasskeyCredentialStoreError.appGroupUnavailable
     }
 
-    let keyData = try decodeKeystorePayload(payload, masterKey: masterKey)
+    let candidates = parentKeyCandidates(masterKey: masterKey, appGroup: appGroup)
+    guard let selected = PasskeyKeystoreRecords.selectParentKey(
+      candidates: candidates,
+      requestedScheme: scheme
+    ) else {
+      throw PasskeyCredentialStoreError.parentKeyUnavailable(scheme)
+    }
+    guard let bytes = material(of: selected.keyId, masterKey: masterKey, appGroup: appGroup) else {
+      throw PasskeyCredentialStoreError.parentMaterialUnavailable(selected.keyId)
+    }
+    return PasskeyParentSecret(keyId: selected.keyId, scheme: selected.scheme, bytes: bytes)
+  }
+
+  /// The roots this device could derive from, most authoritative first: what the
+  /// wallet pointed us at, then any root record present in the shared store.
+  ///
+  /// The scan matters for a credential pinned to a scheme the wallet is no longer
+  /// pointing at: an already-issued passkey must keep re-deriving from the
+  /// BIP32-Ed25519 root even once new keys use the dp256 main key.
+  private func parentKeyCandidates(
+    masterKey: Data,
+    appGroup: String
+  ) -> [(keyId: String, scheme: String)] {
+    let pointed = [
+      defaults.string(forKey: Self.defaultMainKeyIdKey),
+      defaults.string(forKey: Self.defaultHdRootKeyIdKey),
+    ].compactMap { $0 }
+
+    let discovered = PasskeyKeystoreMMKV.allKeys(forAppGroup: appGroup, error: nil)
+      .filter { $0.hasPrefix(PasskeyKeystoreRecords.metadataPrefix) }
+      .map { String($0.dropFirst(PasskeyKeystoreRecords.metadataPrefix.count)) }
+
+    var seen = Set<String>()
+    var candidates: [(keyId: String, scheme: String)] = []
+    for id in pointed + discovered where seen.insert(id).inserted {
+      guard let record = metadata(of: id, masterKey: masterKey, appGroup: appGroup) else { continue }
+      // A discovered record is only a candidate if it is a root; a record the
+      // wallet explicitly pointed at is trusted even if its type predates the
+      // current naming.
+      if !pointed.contains(id),
+         record["type"] as? String != PasskeyKeystoreRecords.typeHdRootKey
+      {
+        continue
+      }
+      candidates.append((keyId: id, scheme: PasskeyKeystoreRecords.scheme(of: record)))
+    }
+    return candidates
+  }
+
+  /// A record's metadata, from `k/<id>` (plaintext) or from the sealed legacy flat
+  /// record keyed by the bare id.
+  private func metadata(of id: String, masterKey: Data, appGroup: String) -> [String: Any]? {
+    if let plaintext = try? PasskeyKeystoreMMKV.string(
+      forKey: PasskeyKeystoreRecords.metadataKey(id),
+      appGroup: appGroup
+    ),
+      let data = plaintext.data(using: .utf8),
+      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    {
+      return json
+    }
+    guard let payload = try? PasskeyKeystoreMMKV.string(forKey: id, appGroup: appGroup) else {
+      return nil
+    }
+    return try? decodeKeystorePayload(payload, masterKey: masterKey)
+  }
+
+  /// A record's raw secret bytes, from `m/<id>` (whose sealed plaintext is
+  /// `base64(bytes)`) or from the inline material of the legacy flat record.
+  private func material(of id: String, masterKey: Data, appGroup: String) -> Data? {
+    if let sealed = try? PasskeyKeystoreMMKV.string(
+      forKey: PasskeyKeystoreRecords.materialKey(id),
+      appGroup: appGroup
+    ),
+      let encoded = try? decryptData(masterKey, sealed),
+      let bytes = Data(base64Encoded: encoded) ?? Data(base64URLEncoded: encoded)
+    {
+      return bytes
+    }
+
+    guard let payload = try? PasskeyKeystoreMMKV.string(forKey: id, appGroup: appGroup),
+          let keyData = try? decodeKeystorePayload(payload, masterKey: masterKey)
+    else {
+      return nil
+    }
     if let seed = dataArray(keyData["seed"]) ?? dataArray(keyData["privateKey"]) {
       return seed
     }
-    if let seed = keyData["seed"] as? String ?? keyData["privateKey"] as? String,
-       let data = Self.secretStringData(seed)
-    {
-      return data
+    if let seed = keyData["seed"] as? String ?? keyData["privateKey"] as? String {
+      return Self.secretStringData(seed)
     }
-    throw PasskeyCredentialStoreError.hdRootKeyUnavailable
+    return nil
+  }
+
+  /// The raw parent secret for a new credential. Prefer ``parentSecret(scheme:)``,
+  /// whose failure says which of the three things went wrong.
+  func hdRootKeySecret() throws -> Data {
+    try parentSecret().bytes
   }
 
   func configureIntentActions(getPasskeyAction: String, createPasskeyAction: String) {
@@ -503,10 +707,13 @@ final class PasskeyCredentialStore {
 
   private func decodeKeystorePayload(_ payload: String, masterKey: Data) throws -> [String: Any] {
     let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+    // An envelope is `iv` + `content` (the tag either appended to the content or,
+    // in the legacy shape, in its own `tag` field). Anything else that is JSON is
+    // an already-decoded record.
     if trimmed.hasPrefix("{"),
        let payloadData = trimmed.data(using: .utf8),
        let json = try JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
-       json["iv"] == nil || json["tag"] == nil || json["content"] == nil
+       json["iv"] == nil || json["content"] == nil
     {
       return json
     }
@@ -541,16 +748,33 @@ final class PasskeyCredentialStore {
   private func decryptData(_ key: Data, _ payload: String) throws -> String {
     guard let payloadData = payload.data(using: .utf8),
           let json = try JSONSerialization.jsonObject(with: payloadData) as? [String: String],
-          let iv = Data(base64Encoded: json["iv"] ?? ""),
-          let tag = Data(base64Encoded: json["tag"] ?? ""),
-          let content = Data(base64Encoded: json["content"] ?? "")
+          let ivString = json["iv"], let iv = Data(base64Encoded: ivString),
+          let contentString = json["content"], let content = Data(base64Encoded: contentString)
     else {
       throw PasskeyCredentialStoreError.credentialEncodingFailed
     }
 
+    // The keystore's current `sealData` appends the 16-byte GCM tag to the
+    // ciphertext (the WebCrypto convention); the legacy envelope carried it in its
+    // own field. Both have to open, or existing records become unreadable.
+    let ciphertext: Data
+    let tag: Data
+    if let tagString = json["tag"], let separateTag = Data(base64Encoded: tagString),
+       !separateTag.isEmpty
+    {
+      ciphertext = content
+      tag = separateTag
+    } else {
+      guard content.count > 16 else {
+        throw PasskeyCredentialStoreError.credentialEncodingFailed
+      }
+      ciphertext = content.prefix(content.count - 16)
+      tag = content.suffix(16)
+    }
+
     let sealedBox = try AES.GCM.SealedBox(
       nonce: AES.GCM.Nonce(data: iv),
-      ciphertext: content,
+      ciphertext: ciphertext,
       tag: tag
     )
     let decrypted = try AES.GCM.open(sealedBox, using: SymmetricKey(data: key))

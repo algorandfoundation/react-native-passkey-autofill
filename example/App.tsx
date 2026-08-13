@@ -205,7 +205,8 @@ function AppContent() {
         return;
       }
 
-      await ReactNativePasskeyAutofill.setHdRootKeyId(ed25519Key.metadata.parentKeyId);
+      // Set the P-256 main key ID (parent secret for passkey derivation)
+      await ReactNativePasskeyAutofill.setMainKeyId(ed25519Key.metadata.parentKeyId);
 
       const response = await fetch("https://debug.liquidauth.com/attestation/request", {
         method: "POST",

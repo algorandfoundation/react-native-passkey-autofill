@@ -54,10 +54,34 @@ class ReactNativePasskeyAutofillModule : Module() {
       }
     }
 
+    // Points the passkey hierarchy at the wallet's deterministic-P256 main key.
+    // The scheme is not a parameter: it is read from the record's own metadata,
+    // so a wallet cannot mislabel which hierarchy it handed us.
+    AsyncFunction("setMainKeyId") { id: String ->
+      val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
+      if (context != null) {
+        credentialRepository.saveMainKeyId(context, id)
+      } else {
+        Log.e(CredentialRepository.TAG, "Could not get context to save main key ID")
+      }
+    }
+
+    AsyncFunction("getMainKeyId") {
+      val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
+      if (context != null) {
+        credentialRepository.getMainKeyId(context)
+      } else {
+        Log.e(CredentialRepository.TAG, "Could not get context to get main key ID")
+        null
+      }
+    }
+
+    // Deprecated aliases of the two above, kept because installed wallets still
+    // call them. They address the same slot — see `saveMainKeyId`.
     AsyncFunction("setHdRootKeyId") { id: String ->
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
       if (context != null) {
-        credentialRepository.saveHdRootKeyId(context, id)
+        credentialRepository.saveMainKeyId(context, id)
       } else {
         Log.e(CredentialRepository.TAG, "Could not get context to save HD root key ID")
       }
@@ -66,7 +90,7 @@ class ReactNativePasskeyAutofillModule : Module() {
     AsyncFunction("getHdRootKeyId") {
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
       if (context != null) {
-        credentialRepository.getHdRootKeyId(context)
+        credentialRepository.getMainKeyId(context)
       } else {
         Log.e(CredentialRepository.TAG, "Could not get context to get HD root key ID")
         null
@@ -141,6 +165,7 @@ class ReactNativePasskeyAutofillModule : Module() {
           "userName" to credential.userHandle,
           "userHandle" to credential.userHandle,
           "publicKey" to credential.publicKey,
+          "derivationScheme" to credential.derivationScheme,
         )
       }
     }

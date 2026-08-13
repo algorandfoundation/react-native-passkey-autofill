@@ -26,6 +26,8 @@ import androidx.credentials.webauthn.PublicKeyCredentialRequestOptions
 import co.algorand.passkeyautofill.auth.BiometricRequirement
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
+import co.algorand.passkeyautofill.credentials.KeystoreRecords
+import co.algorand.passkeyautofill.credentials.ParentSecretResult
 import co.algorand.passkeyautofill.utils.PasskeyUtils
 import java.security.KeyPair
 import java.security.MessageDigest
@@ -584,12 +586,19 @@ class GetPasskeyActivity : AppCompatActivity() {
                 )
                 val prfInput = Prf.parseInput(passkeyRequestJsonObj, credentialIdB64Url)
                 if (prfInput != null) {
-                    val hdRootSecret = credentialRepository.getHdRootSecret(this@GetPasskeyActivity)
-                    if (hdRootSecret == null) {
-                        Log.w(TAG, "PRF input present but HD root secret unavailable; skipping PRF output")
+                    // PRF is recomputed from the parent secret on EVERY assertion,
+                    // so it must use the very parent this credential was created
+                    // against — an unstamped credential predates the dp256 main
+                    // key and is pinned to the BIP32-Ed25519 root.
+                    val parent = credentialRepository.resolveParentSecret(
+                        this@GetPasskeyActivity,
+                        dbCred.derivationScheme ?: KeystoreRecords.SCHEME_BIP32_ED25519,
+                    )
+                    if (parent !is ParentSecretResult.Available) {
+                        Log.w(TAG, "PRF input present but parent secret unavailable (${parent.reason}); skipping PRF output")
                     } else {
                         val credRandom = Prf.credRandom(
-                            hdRootSecret = hdRootSecret,
+                            hdRootSecret = parent.secret.bytes,
                             relyingPartyIdentifier = displayOrigin,
                             userHandle = dbCred.userHandle,
                         )

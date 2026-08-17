@@ -193,7 +193,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
       attachPrfRegistrationOutput(
         to: registrationCredential,
-        derivedParentSecret: derivedParentSecret,
+        derivedParentSecret: parent.bytes,
         relyingPartyIdentifier: identity.relyingPartyIdentifier,
         userHandle: userHandle
       )

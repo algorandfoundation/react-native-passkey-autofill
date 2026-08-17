@@ -1,3 +1,9 @@
+# [1.0.0-canary.26](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.25...v1.0.0-canary.26) (2026-08-17)
+
+### Bug Fixes
+
+- use parent.bytes for PRF registration derived secret ([48e594a](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/48e594a06d96bdbc6063bc4750f3699404d88a1b))
+
 # [1.0.0-canary.25](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.24...v1.0.0-canary.25) (2026-08-13)
 
 ### Bug Fixes

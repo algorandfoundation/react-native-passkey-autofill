@@ -17,6 +17,7 @@ import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CreatePublicKeyCredentialResponse
+import androidx.credentials.exceptions.CreateCredentialUnknownException
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.credentials.provider.ProviderCreateCredentialRequest
 import androidx.credentials.webauthn.AuthenticatorAttestationResponse
@@ -25,6 +26,7 @@ import androidx.credentials.webauthn.PublicKeyCredentialCreationOptions
 import co.algorand.passkeyautofill.auth.BiometricRequirement
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
+import co.algorand.passkeyautofill.credentials.MasterKeyUnavailableException
 import co.algorand.passkeyautofill.utils.PasskeyUtils
 import java.security.KeyPair
 import android.util.Base64 as AndroidBase64
@@ -470,6 +472,18 @@ class CreatePasskeyActivity : AppCompatActivity() {
             ReactNativePasskeyAutofillModule.instance?.sendEvent("onPasskeyAdded", Bundle().apply {
                 putBoolean("success", true)
             })
+            finish()
+        } catch (e: MasterKeyUnavailableException) {
+            // Nothing was written. Retrying from the UI cannot help — only the
+            // wallet calling setMasterKey can — so report a definite failure to
+            // the relying party instead of leaving the sheet open.
+            Log.e(TAG, "Passkey creation aborted: master key unavailable", e)
+            val errorIntent = Intent()
+            PendingIntentHandler.setCreateCredentialException(
+                errorIntent,
+                CreateCredentialUnknownException("Passkey provider is not ready: master key unavailable"),
+            )
+            setResult(Activity.RESULT_OK, errorIntent)
             finish()
         } catch (e: Exception) {
             Log.e(TAG, "Error during passkey creation", e)

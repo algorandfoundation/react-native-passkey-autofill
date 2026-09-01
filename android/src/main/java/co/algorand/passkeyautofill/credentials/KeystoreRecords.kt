@@ -105,6 +105,73 @@ object KeystoreRecords {
         return AndroidBase64.decode(obj.getString("\$u8"), AndroidBase64.DEFAULT)
     }
 
+    /** Master key length: the wallet's keystore generates a 32-byte (AES-256) key. */
+    const val MASTER_KEY_LENGTH = 32
+
+    /**
+     * Proves that `masterKey` can seal AND open a payload before anything is
+     * trusted to it: a fresh random probe goes through [sealEnvelope] and
+     * [openEnvelope] and must come back intact. Throws on a wrong-length key,
+     * a broken cipher provider, or a mismatched round trip. Used when the
+     * master key is stored and again before a `CreateEntry` is offered, so a
+     * key that cannot encrypt never reaches a credential write.
+     */
+    fun verifySealRoundTrip(masterKey: ByteArray) {
+        require(masterKey.size == MASTER_KEY_LENGTH) {
+            "Master key must be $MASTER_KEY_LENGTH bytes (AES-256), got ${masterKey.size}"
+        }
+        val probe = ByteArray(32)
+        SecureRandom().nextBytes(probe)
+        val plaintext = AndroidBase64.encodeToString(probe, AndroidBase64.NO_WRAP)
+        val opened = openEnvelope(masterKey, sealEnvelope(masterKey, plaintext))
+        check(opened == plaintext) { "Master key seal/open round trip did not reproduce the probe" }
+    }
+
+    /**
+     * Whether `payload` is a sealed envelope (either the legacy `{iv, tag,
+     * content}` or the new `{iv, content}` shape) as opposed to an unsealed
+     * record body.
+     */
+    fun isSealedEnvelope(payload: String): Boolean {
+        if (!payload.startsWith("{")) return false
+        return try {
+            val json = JSONObject(payload)
+            json.has("iv") && json.has("content")
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Keys of legacy flat records that were written WITHOUT a sealed envelope
+     * and decode as one of THIS MODULE's passkey types.
+     *
+     * Builds before the fail-closed `saveCredential` fell back to writing the
+     * record as bare `base64url(JSON)` when no master key was available at
+     * creation time, leaving the P-256 private key unencrypted in the shared
+     * store. [CredentialRepository] re-seals these the moment a master key is
+     * stored. Split-layout (`k/`, `m/`) entries and anything the wallet owns
+     * are never returned.
+     */
+    fun unsealedPasskeyRecordKeys(
+        allKeys: Array<String>,
+        payloadFor: (String) -> String?,
+    ): List<String> {
+        val unsealed = mutableListOf<String>()
+        for (key in allKeys) {
+            if (key.startsWith(METADATA_PREFIX) || key.startsWith(MATERIAL_PREFIX)) continue
+            val payload = payloadFor(key) ?: continue
+            if (isSealedEnvelope(payload)) continue
+            val type = try {
+                decodeLegacyRecord(payload, null).optString("type", "")
+            } catch (e: Exception) {
+                continue
+            }
+            if (isPasskeyRecordType(type)) unsealed.add(key)
+        }
+        return unsealed
+    }
+
     /**
      * Seals `plaintext` with `masterKey` in the NEW `{iv, content}` envelope:
      * a fresh 96-bit IV, AES-256-GCM, tag appended to the ciphertext. Mirrors
@@ -223,8 +290,11 @@ object KeystoreRecords {
      * - Sealed: `payload` is a JSON envelope (`{iv, tag, content}` or
      *   `{iv, content}`); once opened, the plaintext is
      *   `base64url(JSON.stringify(KeyData))`.
-     * - Unsealed fallback (no master key available at write time): `payload`
-     *   is directly `base64url(JSON.stringify(KeyData))`.
+     * - Unsealed (READ-ONLY compatibility): `payload` is directly
+     *   `base64url(JSON.stringify(KeyData))`. Nothing writes this shape any
+     *   more — `saveCredential` fails closed without a master key — but
+     *   records an older build left behind must still be readable so they
+     *   can be re-sealed (see [unsealedPasskeyRecordKeys]).
      *
      * Byte fields (`privateKey`, `publicKey`, `seed`, …) inside the returned
      * JSON are plain number arrays, per the legacy `KeyData` encoding — NOT
@@ -249,7 +319,7 @@ object KeystoreRecords {
             return envelope
         }
 
-        // Unsealed fallback: base64url(JSON) directly (no envelope at all).
+        // Unsealed legacy record: base64url(JSON) directly (no envelope at all).
         val decodedBytes = AndroidBase64.decode(payload, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
         return JSONObject(String(decodedBytes, Charsets.UTF_8))
     }

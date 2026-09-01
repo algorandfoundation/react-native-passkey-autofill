@@ -75,6 +75,15 @@ sealed class ParentSecretResult {
         }
 }
 
+/**
+ * Thrown when an operation that MUST encrypt has no master key to encrypt
+ * with. Creation aborts on it: a passkey private key is never written to the
+ * shared store in the clear (F-2026-18982).
+ */
+class MasterKeyUnavailableException(
+    message: String = "Passkey master key unavailable: the wallet has not shared it with this process (setMasterKey)",
+) : IllegalStateException(message)
+
 interface CredentialRepository {
     val keyStore: KeyStore
     fun saveCredential(context: Context, credential: Credential, biometricCipher: Cipher? = null)
@@ -102,7 +111,23 @@ interface CredentialRepository {
     fun getAllCredentials(context: Context): List<Credential>
     fun getPublicKeyFromKeyPair(keyPair: KeyPair?): ByteArray
     fun sign(keyPair: KeyPair, payload: ByteArray): ByteArray
+    /**
+     * `true` only when the master key can be read back AND proves it can seal
+     * and open a payload. The Credential Provider service gates every
+     * `CreateEntry` / `PublicKeyCredentialEntry` on this, so a device whose key
+     * cannot encrypt is never offered a passkey to create.
+     */
     fun isMasterKeyAvailable(context: Context): Boolean
+
+    /**
+     * Stores the wallet's master key. Fails closed: a wrong-length key, a
+     * Keystore/Keychain failure, or a key that cannot round-trip a seal
+     * throws instead of being logged and swallowed, so the caller (and the JS
+     * side, as a rejected promise) knows the key is NOT in place.
+     *
+     * On success any of this module's own legacy records that an earlier build
+     * wrote unsealed are re-sealed under the new key.
+     */
     fun saveMasterKey(context: Context, secret: ByteArray)
 
     /**
@@ -248,13 +273,13 @@ class Repository() : CredentialRepository {
         val jsonString = keyData.toString()
         val base64urlJson = AndroidBase64.encodeToString(jsonString.toByteArray(Charsets.UTF_8), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
 
-        // 3. Seal matching react-native-keystore's commit()
-        val masterKey = getMasterKey(context)
-        if (masterKey != null) {
-            mmkv.encode(credential.credentialId, KeystoreRecords.sealEnvelope(masterKey, base64urlJson))
-        } else {
-            Log.w(CredentialRepository.TAG, "Master key not available for encrypting credential, saving encoded only")
-            mmkv.encode(credential.credentialId, base64urlJson)
+        // 3. Seal matching react-native-keystore's commit(). There is deliberately
+        // no unsealed fallback: without the master key the record — which carries
+        // the P-256 private key — is not written at all and creation aborts.
+        val masterKey = getMasterKey(context) ?: throw MasterKeyUnavailableException()
+        val sealed = KeystoreRecords.sealEnvelope(masterKey, base64urlJson)
+        check(mmkv.encode(credential.credentialId, sealed)) {
+            "Failed to write sealed credential record for ${credential.origin}"
         }
     }
 
@@ -529,6 +554,12 @@ class Repository() : CredentialRepository {
     ): DerivedDomainKeyPair {
         Log.d(CredentialRepository.TAG, "createDomainKeyPair for origin: $origin, userHandle: $userHandle, scheme: ${requestedScheme ?: "preferred"}")
         val resolved = resolveParentSecret(context, requestedScheme)
+        if (resolved is ParentSecretResult.MasterKeyUnavailable) {
+            // Typed so the create flow can report a definite failure to the
+            // relying party: without the master key nothing can be derived OR
+            // stored, and no amount of retrying from the UI changes that.
+            throw MasterKeyUnavailableException("Cannot derive a passkey: ${resolved.reason}")
+        }
         if (resolved !is ParentSecretResult.Available) {
             throw IllegalStateException("Cannot derive a passkey: ${resolved.reason}")
         }
@@ -677,12 +708,58 @@ class Repository() : CredentialRepository {
     }
 
     override fun saveMasterKey(context: Context, secret: ByteArray) {
+        // Reject a key that could never seal anything BEFORE touching storage, so
+        // a bad key does not replace a working one.
+        KeystoreRecords.verifySealRoundTrip(secret)
+
         // The master key arrives as raw bytes (the bridge no longer takes a hex
-        // String), so encrypt it straight into the Keychain.
+        // String), so encrypt it straight into the Keychain. Nothing here is
+        // caught: a Keystore failure must reach the caller.
+        encryptToKeychain(context, secret)
+
+        // Prove the stored key reads back as what was given before reporting
+        // success — a silent readback failure would leave the wallet believing
+        // the key is in place while every later write fails.
+        val readBack = decryptFromKeychain(context)
+        check(readBack != null && readBack.contentEquals(secret)) {
+            "Master key did not read back from the Keychain after saving"
+        }
+
+        resealUnsealedRecords(context, secret)
+    }
+
+    /**
+     * Re-seals any of this module's own legacy flat records that an earlier
+     * build wrote without the AES-GCM envelope (see
+     * [KeystoreRecords.unsealedPasskeyRecordKeys]). It runs here, when the master
+     * key arrives, because that is the point at which the wallet has authenticated
+     * its user and unlocked. A record that cannot be re-sealed is left in place
+     * and logged rather than dropped: the credential id is what the relying
+     * party knows, and deleting it would orphan the account.
+     */
+    private fun resealUnsealedRecords(context: Context, masterKey: ByteArray) {
         try {
-            encryptToKeychain(context, secret)
+            val mmkv = getPasskeysMMKV(context)
+            val keys = KeystoreRecords.unsealedPasskeyRecordKeys(mmkv.allKeys() ?: emptyArray()) {
+                mmkv.decodeString(it)
+            }
+            if (keys.isEmpty()) return
+            Log.w(CredentialRepository.TAG, "Re-sealing ${keys.size} passkey record(s) stored without encryption")
+            for (key in keys) {
+                val payload = mmkv.decodeString(key) ?: continue
+                // The envelope's plaintext is base64url(JSON); a record stored as
+                // bare JSON is normalised to that shape first.
+                val plaintext = if (payload.startsWith("{")) {
+                    AndroidBase64.encodeToString(payload.toByteArray(Charsets.UTF_8), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
+                } else {
+                    payload
+                }
+                if (!mmkv.encode(key, KeystoreRecords.sealEnvelope(masterKey, plaintext))) {
+                    Log.e(CredentialRepository.TAG, "Failed to re-seal passkey record $key")
+                }
+            }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to save master key to Keychain", e)
+            Log.e(CredentialRepository.TAG, "Failed to re-seal unsealed passkey records", e)
         }
     }
 
@@ -748,7 +825,14 @@ class Repository() : CredentialRepository {
     }
 
     override fun isMasterKeyAvailable(context: Context): Boolean {
-        return getMasterKey(context) != null
+        val masterKey = getMasterKey(context) ?: return false
+        return try {
+            KeystoreRecords.verifySealRoundTrip(masterKey)
+            true
+        } catch (e: Exception) {
+            Log.e(CredentialRepository.TAG, "Master key present but cannot seal/open a payload", e)
+            false
+        }
     }
 
     override fun saveMainKeyId(context: Context, id: String) {

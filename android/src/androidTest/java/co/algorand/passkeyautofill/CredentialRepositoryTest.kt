@@ -1,9 +1,15 @@
 package co.algorand.passkeyautofill
 
+import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.credentials.CredentialRepository
+import co.algorand.passkeyautofill.credentials.KeystoreRecords
+import co.algorand.passkeyautofill.credentials.MasterKeyUnavailableException
+import com.tencent.mmkv.MMKV
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -19,6 +25,109 @@ class CredentialRepositoryTest {
     fun setUp() {
         repository = CredentialRepository()
         repository.clearCredentials(context)
+        forgetMasterKey()
+    }
+
+    /** Removes the stored master key so the process is in its "wallet has not called setMasterKey" state. */
+    private fun forgetMasterKey() {
+        context.getSharedPreferences(CredentialRepository.KEYCHAIN_STORAGE_NAME, Context.MODE_PRIVATE)
+            .edit().clear().commit()
+    }
+
+    private fun passkeysMMKV(): MMKV {
+        MMKV.initialize(context)
+        return MMKV.mmkvWithID(CredentialRepository.PASSKEYS_MMKV_ID, MMKV.MULTI_PROCESS_MODE)
+    }
+
+    // --- Fail-closed master key (F-2026-18982) ------------------------------
+
+    @Test
+    fun saveCredentialWithoutAMasterKeyThrowsAndWritesNothing() {
+        assertFalse(repository.isMasterKeyAvailable(context))
+        val credential = Credential(
+            credentialId = "no-master-key",
+            origin = "https://example.com",
+            userHandle = "user-handle",
+            userId = "user-id",
+            publicKey = "YTM0",
+            privateKey = "c2VjcmV0", // "secret"
+            count = 0
+        )
+
+        try {
+            repository.saveCredential(context, credential)
+            fail("saveCredential must refuse to write without a master key")
+        } catch (e: MasterKeyUnavailableException) {
+            // expected
+        }
+
+        assertFalse(passkeysMMKV().containsKey("no-master-key"))
+        assertNull(repository.getCredential(context, "no-master-key".toByteArray()))
+    }
+
+    @Test
+    fun saveMasterKeyRejectsAWrongLengthKeyAndKeepsTheOldOne() {
+        val good = ByteArray(KeystoreRecords.MASTER_KEY_LENGTH) { it.toByte() }
+        repository.saveMasterKey(context, good)
+        assertTrue(repository.isMasterKeyAvailable(context))
+
+        try {
+            repository.saveMasterKey(context, ByteArray(16) { 1 })
+            fail("a 16-byte master key must be rejected")
+        } catch (e: IllegalArgumentException) {
+            // expected
+        }
+
+        // The previous, valid key is untouched.
+        assertTrue(repository.isMasterKeyAvailable(context))
+    }
+
+    @Test
+    fun aSavedCredentialIsSealedInTheStore() {
+        repository.saveMasterKey(context, ByteArray(32) { it.toByte() })
+        val credential = Credential(
+            credentialId = "sealed-credential",
+            origin = "https://example.com",
+            userHandle = "user-handle",
+            userId = "user-id",
+            publicKey = "YTM0",
+            privateKey = "c2VjcmV0",
+            count = 0
+        )
+        repository.saveCredential(context, credential)
+
+        val stored = passkeysMMKV().decodeString("sealed-credential")
+        assertNotNull(stored)
+        assertTrue(KeystoreRecords.isSealedEnvelope(stored!!))
+        assertFalse(stored.contains("privateKey"))
+    }
+
+    @Test
+    fun saveMasterKeyResealsRecordsAnOlderBuildLeftUnsealed() {
+        // Plant exactly what the pre-fix fallback wrote: bare base64url(JSON)
+        // carrying the private key, keyed by the bare credential id.
+        val keyData = JSONObject()
+            .put("id", "left-unsealed")
+            .put("type", "hd-derived-p256")
+            .put("privateKey", JSONArray(listOf(1, 2, 3)))
+            .put("publicKey", JSONArray(listOf(4, 5, 6)))
+            .put("metadata", JSONObject().put("origin", "https://legacy.example").put("userHandle", "u").put("userId", "id"))
+        val unsealed = android.util.Base64.encodeToString(
+            keyData.toString().toByteArray(Charsets.UTF_8),
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP,
+        )
+        passkeysMMKV().encode("left-unsealed", unsealed)
+
+        val masterKey = ByteArray(32) { (it * 3).toByte() }
+        repository.saveMasterKey(context, masterKey)
+
+        val stored = passkeysMMKV().decodeString("left-unsealed")!!
+        assertTrue(KeystoreRecords.isSealedEnvelope(stored))
+        assertFalse(stored.contains("privateKey"))
+        // And the record is still readable through the normal path.
+        val reopened = KeystoreRecords.decodeLegacyRecord(stored, masterKey)
+        assertEquals("left-unsealed", reopened.getString("id"))
+        assertEquals("https://legacy.example", repository.getCredential(context, "left-unsealed".toByteArray())?.origin)
     }
 
     @Test

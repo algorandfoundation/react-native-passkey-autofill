@@ -106,8 +106,39 @@ interface CredentialRepository {
     ): DerivedDomainKeyPair
     fun getOrigin(info: CallingAppInfo): String
     fun appInfoToOrigin(info: CallingAppInfo): String
+
+    /**
+     * The credential stored under `credentialId` WITH its private material
+     * (`privateKey`), opening the biometric wrapper with `biometricCipher` when
+     * the record has one. This is the only read that materialises a private
+     * key, so it must run after the user has selected the credential and
+     * completed whatever verification the request demands — never during
+     * candidate enumeration. Prefer [getCredentialMetadata] for anything that
+     * does not sign.
+     */
     fun getCredential(context: Context, credentialId: ByteArray, biometricCipher: Cipher? = null): Credential?
+
+    /**
+     * The credential stored under `credentialId` WITHOUT private material:
+     * `privateKey` is always empty. Needs no cipher and cannot trip a
+     * user-authentication requirement, so it is the right lookup for the
+     * relying-party checks and response metadata that precede signing.
+     */
+    fun getCredentialMetadata(context: Context, credentialId: ByteArray): Credential?
+
+    /** First stored credential for `origin`, metadata only (see [getAllCredentials]). */
     fun getCredentialByOrigin(context: Context, origin: String): Credential?
+
+    /**
+     * Every credential this module owns, METADATA ONLY: `privateKey` is empty
+     * on each. Enumeration runs before the user has picked a credential or
+     * verified anything (the Credential Provider service builds the chooser
+     * from it), so no private scalar is copied into an immutable string for
+     * records the user may never select. A legacy flat record still has to be
+     * opened to read its metadata — that is the record format — but its
+     * material is not decoded. Load exactly one credential's key afterwards
+     * with [getCredential] / [getKeyPair].
+     */
     fun getAllCredentials(context: Context): List<Credential>
     fun getPublicKeyFromKeyPair(keyPair: KeyPair?): ByteArray
     fun sign(keyPair: KeyPair, payload: ByteArray): ByteArray
@@ -331,31 +362,64 @@ class Repository() : CredentialRepository {
                 if (!KeystoreRecords.isPasskeyRecordType(json.optString("type", ""))) {
                     continue
                 }
-                if (json.has("id") && (json.has("origin") || json.has("metadata"))) {
-                    val metadata = json.optJSONObject("metadata")
-                    val encJson = json.optJSONObject("privateKeyEnc")
-
-                    credentials.add(Credential(
-                        credentialId = json.getString("id"),
-                        origin = metadata?.optString("origin") ?: json.optString("origin", ""),
-                        userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
-                        userId = metadata?.optString("userId") ?: json.optString("userId", ""),
-                        publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
-                        privateKey = if (json.has("privateKey")) AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT) else "",
-                        count = metadata?.optInt("count") ?: json.optInt("count", 0),
-                        biometricIv = encJson?.optString("iv"),
-                        parentKeyId = metadata?.optString("parentKeyId").takeUnless { it.isNullOrEmpty() },
-                        derivationScheme = metadata?.optString("scheme").takeUnless { it.isNullOrEmpty() },
-                        derivationVersion = metadata?.optInt("derivationVersion", PasskeyDerivation.VERSION_LEGACY_LABEL)
-                            ?: PasskeyDerivation.VERSION_LEGACY_LABEL,
-                    ))
-                }
+                // Enumeration: metadata only, the material stays undecoded.
+                credentialFromLegacyRecord(json, biometricCipher = null, includeMaterial = false)
+                    ?.let { credentials.add(it) }
             } catch (e: Exception) {
                 // Not a JSON or not a credential or decryption failed, skip
                 continue
             }
         }
         return credentials
+    }
+
+    /**
+     * Builds a [Credential] from a decoded legacy flat record (`KeyData` JSON).
+     *
+     * @param includeMaterial whether to materialise the private key. `false`
+     *   for enumeration and pre-signing lookups; `true` only for the single
+     *   credential the user selected and verified for.
+     * @param biometricCipher opens a biometric-wrapped `privateKeyEnc` when
+     *   material is requested and the record carries one.
+     */
+    private fun credentialFromLegacyRecord(
+        json: JSONObject,
+        biometricCipher: Cipher?,
+        includeMaterial: Boolean,
+    ): Credential? {
+        if (!json.has("id") || !(json.has("origin") || json.has("metadata"))) return null
+        val metadata = json.optJSONObject("metadata")
+        val encJson = json.optJSONObject("privateKeyEnc")
+
+        val privateKey = when {
+            !includeMaterial -> ""
+            encJson != null && biometricCipher != null -> {
+                Log.d(CredentialRepository.TAG, "Decrypting privateKey with biometricCipher")
+                val data = AndroidBase64.decode(encJson.getString("data"), AndroidBase64.DEFAULT)
+                AndroidBase64.encodeToString(biometricCipher.doFinal(data), AndroidBase64.DEFAULT)
+            }
+            json.has("privateKey") ->
+                AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT)
+            else -> {
+                Log.w(CredentialRepository.TAG, "No privateKey found in JSON")
+                ""
+            }
+        }
+
+        return Credential(
+            credentialId = json.getString("id"),
+            origin = metadata?.optString("origin") ?: json.optString("origin", ""),
+            userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
+            userId = metadata?.optString("userId") ?: json.optString("userId", ""),
+            publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
+            privateKey = privateKey,
+            count = metadata?.optInt("count") ?: json.optInt("count", 0),
+            biometricIv = encJson?.optString("iv"),
+            parentKeyId = metadata?.optString("parentKeyId").takeUnless { it.isNullOrEmpty() },
+            derivationScheme = metadata?.optString("scheme").takeUnless { it.isNullOrEmpty() },
+            derivationVersion = metadata?.optInt("derivationVersion", PasskeyDerivation.VERSION_LEGACY_LABEL)
+                ?: PasskeyDerivation.VERSION_LEGACY_LABEL,
+        )
     }
 
     /**
@@ -398,7 +462,18 @@ class Repository() : CredentialRepository {
         return messageDigest.digest(publicKeyBytes)
     }
 
-    override fun getCredential(context: Context, credentialId: ByteArray, biometricCipher: Cipher?): Credential? {
+    override fun getCredential(context: Context, credentialId: ByteArray, biometricCipher: Cipher?): Credential? =
+        readCredential(context, credentialId, biometricCipher, includeMaterial = true)
+
+    override fun getCredentialMetadata(context: Context, credentialId: ByteArray): Credential? =
+        readCredential(context, credentialId, biometricCipher = null, includeMaterial = false)
+
+    private fun readCredential(
+        context: Context,
+        credentialId: ByteArray,
+        biometricCipher: Cipher?,
+        includeMaterial: Boolean,
+    ): Credential? {
         val id = AndroidBase64.encodeToString(credentialId, AndroidBase64.DEFAULT).trim()
         Log.d(CredentialRepository.TAG, "getCredential started for id: $id")
         val mmkv = getPasskeysMMKV(context)
@@ -425,36 +500,7 @@ class Repository() : CredentialRepository {
         }
         return try {
             val json = KeystoreRecords.decodeLegacyRecord(payload, masterKey)
-            val metadata = json.optJSONObject("metadata")
-            val encJson = json.optJSONObject("privateKeyEnc")
-            
-            val privateKey = if (encJson != null && biometricCipher != null) {
-                Log.d(CredentialRepository.TAG, "Decrypting privateKey with biometricCipher")
-                val data = AndroidBase64.decode(encJson.getString("data"), AndroidBase64.DEFAULT)
-                val decrypted = biometricCipher.doFinal(data)
-                AndroidBase64.encodeToString(decrypted, AndroidBase64.DEFAULT)
-            } else if (json.has("privateKey")) {
-                Log.d(CredentialRepository.TAG, "Using plain privateKey from JSON")
-                AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT)
-            } else {
-                Log.w(CredentialRepository.TAG, "No privateKey found in JSON")
-                ""
-            }
-
-            Credential(
-                credentialId = json.getString("id"),
-                origin = metadata?.optString("origin") ?: json.optString("origin", ""),
-                userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
-                userId = metadata?.optString("userId") ?: json.optString("userId", ""),
-                publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
-                privateKey = privateKey,
-                count = metadata?.optInt("count") ?: json.optInt("count", 0),
-                biometricIv = encJson?.optString("iv"),
-                parentKeyId = metadata?.optString("parentKeyId").takeUnless { it.isNullOrEmpty() },
-                derivationScheme = metadata?.optString("scheme").takeUnless { it.isNullOrEmpty() },
-                derivationVersion = metadata?.optInt("derivationVersion", PasskeyDerivation.VERSION_LEGACY_LABEL)
-                    ?: PasskeyDerivation.VERSION_LEGACY_LABEL,
-            )
+            credentialFromLegacyRecord(json, biometricCipher, includeMaterial)
         } catch (e: Exception) {
             null
         }

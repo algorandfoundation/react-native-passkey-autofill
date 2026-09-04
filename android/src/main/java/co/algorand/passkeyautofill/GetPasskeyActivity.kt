@@ -5,7 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
+import co.algorand.passkeyautofill.utils.PasskeyLog
 import android.graphics.Color
 import android.graphics.Typeface
 import android.view.Gravity
@@ -67,27 +67,28 @@ class GetPasskeyActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.i(TAG, "onCreate started")
+        PasskeyLog.init(this)
+        PasskeyLog.i(TAG, "onCreate started")
         
         request = try {
             PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         } catch (e: Exception) {
-            Log.e(TAG, "Error retrieving request from intent", e)
+            PasskeyLog.e(TAG, "Error retrieving request from intent", e)
             null
         }
-        Log.i(TAG, "Retrieved request: $request")
+        PasskeyLog.i(TAG, "Retrieved request: present=${request != null}")
         
         // Check for system-provided biometric result (Single Tap flow)
         try {
             val biometricResult = request?.biometricPromptResult
-            Log.i(TAG, "biometricResult from system: $biometricResult")
+            PasskeyLog.i(TAG, "biometricResult from system: present=${biometricResult != null}")
             if (biometricResult != null) {
                 this.biometricPromptResult = biometricResult
                 // A result object alone is not verification: the prompt may
                 // have failed or been dismissed.
                 systemVerified = biometricResult.isSuccessful
                 val authResult = biometricResult.authenticationResult
-                Log.i(TAG, "authResult from system: $authResult (${authResult?.javaClass?.name})")
+                PasskeyLog.i(TAG, "authResult from system: present=${authResult != null}, successful=$systemVerified")
                 
                 // Also try to find it in the biometricResult object itself
                 systemUnlockedCipher = if (authResult != null) {
@@ -95,10 +96,10 @@ class GetPasskeyActivity : AppCompatActivity() {
                 } else {
                     PasskeyUtils.extractCipher(biometricResult)
                 }
-                Log.i(TAG, "systemUnlockedCipher from system: $systemUnlockedCipher")
+                PasskeyLog.i(TAG, "systemUnlockedCipher from system: present=${systemUnlockedCipher != null}")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing biometricPromptResult", e)
+            PasskeyLog.e(TAG, "Error processing biometricPromptResult", e)
         }
 
         val credentialData = intent.getBundleExtra("CREDENTIAL_DATA")
@@ -132,7 +133,7 @@ class GetPasskeyActivity : AppCompatActivity() {
 
         // If the system already showed a biometric prompt (Single Tap), proceed automatically
         if (biometricPromptResult != null) {
-            Log.d(TAG, "System already showed biometric prompt (Single Tap), proceeding automatically")
+            PasskeyLog.d(TAG, "System already showed biometric prompt (Single Tap), proceeding automatically")
             handleAssertion()
             return
         }
@@ -376,11 +377,11 @@ class GetPasskeyActivity : AppCompatActivity() {
     private fun handleAssertion() {
         if (isHandling) return
         isHandling = true
-        Log.d(TAG, "handleAssertion started, userVerification=$userVerification")
+        PasskeyLog.d(TAG, "handleAssertion started, userVerification=$userVerification")
         lifecycleScope.launch {
             val credentialData = intent.getBundleExtra("CREDENTIAL_DATA")
             val biometricIv = credentialData?.getString("biometricIv")
-            Log.d(TAG, "biometricIv from bundle: $biometricIv")
+            PasskeyLog.d(TAG, "biometricIv from bundle: present=${biometricIv != null}")
             
             // A manual BiometricPrompt this activity showed succeeded.
             var manualVerified = false
@@ -393,10 +394,10 @@ class GetPasskeyActivity : AppCompatActivity() {
                         } else {
                             credentialRepository.getBiometricCipherForEncryption(this@GetPasskeyActivity, requirement)
                         }
-                        Log.i(TAG, "Successfully obtained fallback cipher from repository (Single Tap timeout)")
+                        PasskeyLog.i(TAG, "Successfully obtained fallback cipher from repository (Single Tap timeout)")
                         fallback
                     } catch (e: Exception) {
-                        Log.d(TAG, "Fallback cipher failed: ${e.message}")
+                        PasskeyLog.d(TAG, "Fallback cipher failed: ${e.message}")
                         null
                     }
                 } else {
@@ -414,10 +415,10 @@ class GetPasskeyActivity : AppCompatActivity() {
             val needsCipher = cipherToUse == null && biometricIv != null
             run {
                 if (requiresCeremony || needsCipher) {
-                    Log.i(TAG, "Manual biometrics required (userVerification=$userVerification, biometricIv present=${biometricIv != null})")
+                    PasskeyLog.i(TAG, "Manual biometrics required (userVerification=$userVerification, biometricIv present=${biometricIv != null})")
                     val result = biometrics(biometricIv)
                     if (result == null) {
-                        Log.w(TAG, "Biometrics failed or was canceled")
+                        PasskeyLog.w(TAG, "Biometrics failed or was canceled")
                         val requirement = BiometricRequirement.resolve(this@GetPasskeyActivity)
                         val canUseBiometrics =
                             BiometricManager.from(this@GetPasskeyActivity)
@@ -438,7 +439,7 @@ class GetPasskeyActivity : AppCompatActivity() {
                     manualVerified = true
                     cipherToUse = result.cryptoObject?.cipher ?: cipherToUse
                 } else if (!systemVerified) {
-                    Log.d(TAG, "userVerification is $userVerification and key is not locked, skipping manual biometrics")
+                    PasskeyLog.d(TAG, "userVerification is $userVerification and key is not locked, skipping manual biometrics")
                 }
             }
 
@@ -446,7 +447,7 @@ class GetPasskeyActivity : AppCompatActivity() {
 
             try {
                 val req = request ?: throw IllegalStateException("No request found")
-                Log.d(TAG, "Request found, origin: $origin")
+                PasskeyLog.d(TAG, "Request found")
             
             // Prefer using the request JSON from the bundle if available, as it's specifically for this entry
             val rawRequestJson = bundleRequestJson ?: run {
@@ -460,22 +461,21 @@ class GetPasskeyActivity : AppCompatActivity() {
             } else {
                 rawRequestJson
             }
-            Log.d(TAG, "Passkey request JSON: $passkeyReqJson")
             val requestOptions = try {
                 PublicKeyCredentialRequestOptions(passkeyReqJson)
             } catch (e: org.json.JSONException) {
-                Log.e(TAG, "Invalid passkey request JSON: $passkeyReqJson")
+                PasskeyLog.e(TAG, "Invalid passkey request JSON")
                 throw e
             }
 
             val credId = AndroidBase64.decode(credentialIdEnc!!, AndroidBase64.DEFAULT)
-            Log.d(TAG, "Credential ID decoded")
+            PasskeyLog.d(TAG, "Credential ID decoded")
 
             val passkeyRequestJsonObj = JSONObject(passkeyReqJson)
             val challenge = if (passkeyRequestJsonObj.has("challenge")) {
                 passkeyRequestJsonObj.getString("challenge")
             } else {
-                throw org.json.JSONException("No value for challenge in requestJson: $passkeyReqJson")
+                throw org.json.JSONException("No value for challenge in requestJson")
             }
             val sanitizedOrigin = origin.replace(Regex("/$"), "")
 
@@ -487,9 +487,9 @@ class GetPasskeyActivity : AppCompatActivity() {
                 } as? GetPublicKeyCredentialOption
                 option?.requestData?.getByteArray("androidx.credentials.BUNDLE_KEY_CLIENT_DATA_HASH")
             }
-            Log.d(TAG, "systemClientDataHash present: ${systemClientDataHash != null}")
+            PasskeyLog.d(TAG, "systemClientDataHash present: ${systemClientDataHash != null}")
 
-            Log.d(TAG, "Building clientDataJSON, challenge: $challenge, origin: $sanitizedOrigin")
+            PasskeyLog.d(TAG, "Building clientDataJSON")
             val clientDataJSONString = if (sanitizedOrigin.startsWith("https://") || sanitizedOrigin.startsWith("http://")) {
                 // Compact JSON for web origins to match browser hashing (no spaces, specific order)
                 "{\"type\":\"webauthn.get\",\"challenge\":\"$challenge\",\"origin\":\"$sanitizedOrigin\",\"crossOrigin\":false}"
@@ -510,7 +510,7 @@ class GetPasskeyActivity : AppCompatActivity() {
             // Metadata only: everything the response needs before signing (user
             // handle, derivation pins) is read without touching the private key.
             // The key itself is materialised exactly once, in getKeyPair below.
-            Log.d(TAG, "Getting credential metadata from repository")
+            PasskeyLog.d(TAG, "Getting credential metadata from repository")
             val dbCred = credentialRepository.getCredentialMetadata(this@GetPasskeyActivity, credId)
                 ?: throw IllegalStateException("Credential not found")
 
@@ -519,7 +519,7 @@ class GetPasskeyActivity : AppCompatActivity() {
             // before any private material is loaded.
             val requestedRpId = RelyingParty.effectiveRpId(passkeyReqJson, origin)
             if (requestedRpId == null || !RelyingParty.matches(dbCred.origin, requestedRpId)) {
-                Log.e(TAG, "Credential is not scoped to the requesting relying party; refusing to sign")
+                PasskeyLog.e(TAG, "Credential is not scoped to the requesting relying party; refusing to sign")
                 setupErrorUI(
                     "This passkey was created for a different site or app and cannot be used here.",
                     allowRetry = false,
@@ -528,7 +528,7 @@ class GetPasskeyActivity : AppCompatActivity() {
                 return@launch
             }
 
-            Log.d(TAG, "Getting key pair for signing")
+            PasskeyLog.d(TAG, "Getting key pair for signing")
             val keyPair = try {
                 credentialRepository.getKeyPair(this@GetPasskeyActivity, credId, finalCipher)
                     ?: throw IllegalStateException("No keypair found")
@@ -538,7 +538,7 @@ class GetPasskeyActivity : AppCompatActivity() {
                 // record is biometric-wrapped and the cipher was not yet unlocked.
                 if (e.message?.contains("user not authenticated", ignoreCase = true) == true || 
                     e.cause?.message?.contains("user not authenticated", ignoreCase = true) == true) {
-                     Log.i(TAG, "Key is locked for signing, triggering manual biometric prompt")
+                     PasskeyLog.i(TAG, "Key is locked for signing, triggering manual biometric prompt")
                      val result = biometrics(biometricIv)
                      if (result != null) {
                          manualVerified = true
@@ -562,7 +562,7 @@ class GetPasskeyActivity : AppCompatActivity() {
             check(verification.satisfiesRequest) {
                 "Relying party requires user verification but no verification ceremony completed"
             }
-            Log.d(TAG, "Building AuthenticatorAssertionResponse (uv=${verification.verified})")
+            PasskeyLog.d(TAG, "Building AuthenticatorAssertionResponse (uv=${verification.verified})")
             val response = AuthenticatorAssertionResponse(
                 requestOptions = requestOptions,
                 credentialId = credId,
@@ -576,7 +576,7 @@ class GetPasskeyActivity : AppCompatActivity() {
                 clientDataHash = clientDataHash
             )
 
-            Log.d(TAG, "Signing response")
+            PasskeyLog.d(TAG, "Signing response")
             response.signature = credentialRepository.sign(keyPair, response.dataToSign())
 
             val fidoCredential = FidoPublicKeyCredential(
@@ -620,7 +620,7 @@ class GetPasskeyActivity : AppCompatActivity() {
                         dbCred.derivationScheme ?: KeystoreRecords.SCHEME_BIP32_ED25519,
                     )
                     if (parent !is ParentSecretResult.Available) {
-                        Log.w(TAG, "PRF input present but parent secret unavailable (${parent.reason}); skipping PRF output")
+                        PasskeyLog.w(TAG, "PRF input present but parent secret unavailable (${parent.reason}); skipping PRF output")
                     } else {
                         // Same identity the signing key is derived from, per the
                         // credential's stamped derivation version.
@@ -637,19 +637,20 @@ class GetPasskeyActivity : AppCompatActivity() {
                             prfResults.put("second", Prf.encodeOutput(second))
                         }
                         clientExtensionResults.put("prf", JSONObject().put("results", prfResults))
-                        Log.d(TAG, "Computed PRF assertion output (second present=${second != null})")
+                        PasskeyLog.d(TAG, "Computed PRF assertion output (second present=${second != null})")
                     }
                 }
             } catch (e: Exception) {
                 // Never fail the assertion because of a PRF error; just log
                 // and omit the extension result.
-                Log.w(TAG, "Failed to compute PRF assertion output", e)
+                PasskeyLog.w(TAG, "Failed to compute PRF assertion output", e)
             }
 
             fullJson.put("clientExtensionResults", clientExtensionResults)
 
+            // Never logged: the response carries the signature and, when the
+            // relying party asked for it, the PRF output.
             val credentialJson = fullJson.toString()
-            Log.d(TAG, "Final credential JSON: $credentialJson")
 
             val resultIntent = Intent()
             val passkeyCredential = PublicKeyCredential(credentialJson)
@@ -660,7 +661,7 @@ class GetPasskeyActivity : AppCompatActivity() {
             )
 
             setResult(Activity.RESULT_OK, resultIntent)
-            Log.d(TAG, "Result set to OK")
+            PasskeyLog.d(TAG, "Result set to OK")
             credentialRepository.recordCredentialUsage(this@GetPasskeyActivity, credId)
             ReactNativePasskeyAutofillModule.instance?.sendEvent("onPasskeyAuthenticated", Bundle().apply {
                 putBoolean("success", true)
@@ -668,7 +669,7 @@ class GetPasskeyActivity : AppCompatActivity() {
             })
             finish()
         } catch (e: Exception) {
-            Log.e(TAG, "Error during passkey assertion", e)
+            PasskeyLog.e(TAG, "Error during passkey assertion", e)
             setupErrorUI(
                 "Something went wrong while signing in. Please try again.",
                 allowRetry = true,
@@ -715,7 +716,7 @@ class GetPasskeyActivity : AppCompatActivity() {
                     val cipher = credentialRepository.getBiometricCipherForDecryption(this, ivBytes, requirement)
                     biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to initialize biometric prompt with cipher", e)
+                    PasskeyLog.e(TAG, "Failed to initialize biometric prompt with cipher", e)
                     biometricPrompt.authenticate(promptInfo)
                 }
             } else {

@@ -24,6 +24,7 @@ import androidx.credentials.webauthn.AuthenticatorAssertionResponse
 import androidx.credentials.webauthn.FidoPublicKeyCredential
 import androidx.credentials.webauthn.PublicKeyCredentialRequestOptions
 import co.algorand.passkeyautofill.auth.BiometricRequirement
+import co.algorand.passkeyautofill.auth.UserVerification
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.credentials.KeystoreRecords
@@ -59,6 +60,8 @@ class GetPasskeyActivity : AppCompatActivity() {
     private var bundleRequestJson: String? = null
     private var request: ProviderGetCredentialRequest? = null
     private var biometricPromptResult: Any? = null
+    /** The system's Credential Manager prompt ran for this operation and succeeded. */
+    private var systemVerified: Boolean = false
     private var systemUnlockedCipher: javax.crypto.Cipher? = null
     private var isHandling: Boolean = false
 
@@ -80,6 +83,9 @@ class GetPasskeyActivity : AppCompatActivity() {
             Log.i(TAG, "biometricResult from system: $biometricResult")
             if (biometricResult != null) {
                 this.biometricPromptResult = biometricResult
+                // A result object alone is not verification: the prompt may
+                // have failed or been dismissed.
+                systemVerified = biometricResult.isSuccessful
                 val authResult = biometricResult.authenticationResult
                 Log.i(TAG, "authResult from system: $authResult (${authResult?.javaClass?.name})")
                 
@@ -376,7 +382,9 @@ class GetPasskeyActivity : AppCompatActivity() {
             val biometricIv = credentialData?.getString("biometricIv")
             Log.d(TAG, "biometricIv from bundle: $biometricIv")
             
-            val cipherToUse = systemUnlockedCipher ?: run {
+            // A manual BiometricPrompt this activity showed succeeded.
+            var manualVerified = false
+            var cipherToUse = systemUnlockedCipher ?: run {
                 if (biometricPromptResult != null) {
                     try {
                         val requirement = BiometricRequirement.resolve(this@GetPasskeyActivity)
@@ -394,13 +402,20 @@ class GetPasskeyActivity : AppCompatActivity() {
                 } else {
                     null
                 }
-            } ?: run {
-                // Only prompt for manual biometrics if userVerification is "required" 
-                // OR if the key was saved with biometric protection (biometricIv != null)
-                if (userVerification == "required" || biometricIv != null) {
+            }
+
+            // A manual prompt is needed when the relying party REQUIRES
+            // verification and the system's prompt did not succeed, or when the
+            // key is biometric-wrapped and we hold no unlocked cipher for it.
+            // "preferred"/"discouraged" with an unwrapped key proceed without a
+            // ceremony — and the response's UV flag says so.
+            val requiresCeremony =
+                UserVerification.normalize(userVerification) == UserVerification.REQUIRED && !systemVerified
+            val needsCipher = cipherToUse == null && biometricIv != null
+            run {
+                if (requiresCeremony || needsCipher) {
                     Log.i(TAG, "Manual biometrics required (userVerification=$userVerification, biometricIv present=${biometricIv != null})")
                     val result = biometrics(biometricIv)
-                    Log.d(TAG, "Manual biometrics result: $result")
                     if (result == null) {
                         Log.w(TAG, "Biometrics failed or was canceled")
                         val requirement = BiometricRequirement.resolve(this@GetPasskeyActivity)
@@ -420,15 +435,13 @@ class GetPasskeyActivity : AppCompatActivity() {
                         isHandling = false
                         return@launch
                     }
-                    result.cryptoObject?.cipher
-                } else {
+                    manualVerified = true
+                    cipherToUse = result.cryptoObject?.cipher ?: cipherToUse
+                } else if (!systemVerified) {
                     Log.d(TAG, "userVerification is $userVerification and key is not locked, skipping manual biometrics")
-                    null
                 }
             }
-            
-            Log.d(TAG, "cipherToUse: $cipherToUse")
-            
+
             var finalCipher = cipherToUse
 
             try {
@@ -515,20 +528,6 @@ class GetPasskeyActivity : AppCompatActivity() {
                 return@launch
             }
 
-            Log.d(TAG, "Building AuthenticatorAssertionResponse")
-            val response = AuthenticatorAssertionResponse(
-                requestOptions = requestOptions,
-                credentialId = credId,
-                origin = sanitizedOrigin,
-                up = true,
-                uv = true,
-                be = true,
-                bs = true,
-                userHandle = AndroidBase64.decode(dbCred.userId, AndroidBase64.URL_SAFE),
-                packageName = req.callingAppInfo.packageName,
-                clientDataHash = clientDataHash
-            )
-
             Log.d(TAG, "Getting key pair for signing")
             val keyPair = try {
                 credentialRepository.getKeyPair(this@GetPasskeyActivity, credId, finalCipher)
@@ -542,6 +541,7 @@ class GetPasskeyActivity : AppCompatActivity() {
                      Log.i(TAG, "Key is locked for signing, triggering manual biometric prompt")
                      val result = biometrics(biometricIv)
                      if (result != null) {
+                         manualVerified = true
                          finalCipher = result.cryptoObject?.cipher
                          credentialRepository.getKeyPair(this@GetPasskeyActivity, credId, finalCipher)
                              ?: throw IllegalStateException("No keypair found after manual prompt")
@@ -552,6 +552,29 @@ class GetPasskeyActivity : AppCompatActivity() {
                     throw e
                 }
             }
+
+            // UV reflects what actually happened in this operation. UP stays set:
+            // the user chose this credential's entry in the system chooser (or
+            // tapped Sign In in our sheet), which is the presence gesture. The
+            // response is built after every prompt this flow can show, so the
+            // flag cannot go stale.
+            val verification = UserVerification.outcome(userVerification, systemVerified, manualVerified)
+            check(verification.satisfiesRequest) {
+                "Relying party requires user verification but no verification ceremony completed"
+            }
+            Log.d(TAG, "Building AuthenticatorAssertionResponse (uv=${verification.verified})")
+            val response = AuthenticatorAssertionResponse(
+                requestOptions = requestOptions,
+                credentialId = credId,
+                origin = sanitizedOrigin,
+                up = true,
+                uv = verification.verified,
+                be = true,
+                bs = true,
+                userHandle = AndroidBase64.decode(dbCred.userId, AndroidBase64.URL_SAFE),
+                packageName = req.callingAppInfo.packageName,
+                clientDataHash = clientDataHash
+            )
 
             Log.d(TAG, "Signing response")
             response.signature = credentialRepository.sign(keyPair, response.dataToSign())

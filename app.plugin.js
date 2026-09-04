@@ -28,6 +28,14 @@ const IOS_EXTENSION_SOURCE_FILES = IOS_EXTENSION_FILES.filter((file) => !file.en
 const DETERMINISTIC_P256_PACKAGE_URL =
   "https://github.com/algorandfoundation/deterministic-P256-swift/";
 const DETERMINISTIC_P256_PRODUCT_NAME = "deterministicP256-swift";
+// The exact upstream commit the AutoFill extension compiles against. This
+// package derives passkey keys from the wallet's root material and produces the
+// signatures, so it is pinned to an immutable revision rather than a branch: a
+// branch head can move between two prebuilds of the same wallet commit, which
+// would compile different native crypto into otherwise identical builds.
+// Reviewed when bumped; `main` at the time of pinning.
+const DETERMINISTIC_P256_PACKAGE_REVISION = "4fe03ee04894cb3dcf706b9e70a39588c1cec1c9";
+const GIT_REVISION_REGEX = /^[0-9a-f]{40}$/;
 
 const getAssociatedDomain = (site) => {
   try {
@@ -50,6 +58,30 @@ const getAppGroup = (config, props) =>
 // AutoFill extension so both can read the master key from the Keychain.
 const getKeychainGroup = (config, props) =>
   props.keychainGroup || `${getIosBundleIdentifier(config)}.passkey-autofill`;
+
+// Which commit of `deterministic-P256-swift` the extension links. Integrators may
+// move the pin with `deterministicP256PackageRevision` (a full 40-character
+// commit SHA). Branch and version-range requirements are refused outright:
+// neither is an integrity pin for code that handles wallet root material.
+const getDeterministicP256Revision = (props) => {
+  if (props.deterministicP256PackageBranch !== undefined) {
+    throw new Error(
+      'react-native-passkey-autofill: "deterministicP256PackageBranch" is no longer supported. ' +
+        "A branch is a mutable reference and cannot pin the native crypto compiled into the " +
+        'AutoFill extension; set "deterministicP256PackageRevision" to a full 40-character commit SHA instead.',
+    );
+  }
+  if (props.deterministicP256PackageRevision === undefined) {
+    return DETERMINISTIC_P256_PACKAGE_REVISION;
+  }
+  const value = String(props.deterministicP256PackageRevision).trim().toLowerCase();
+  if (!GIT_REVISION_REGEX.test(value)) {
+    throw new Error(
+      `react-native-passkey-autofill: "deterministicP256PackageRevision" must be a full 40-character commit SHA, received "${props.deterministicP256PackageRevision}".`,
+    );
+  }
+  return value;
+};
 
 const AAGUID_REGEX =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -307,7 +339,7 @@ const withIosPasskeyAutofill = (config, props = {}) => {
         packageName: "deterministic-P256-swift",
         productName: DETERMINISTIC_P256_PRODUCT_NAME,
         repositoryURL: props.deterministicP256PackageURL || DETERMINISTIC_P256_PACKAGE_URL,
-        branch: props.deterministicP256PackageBranch || "main",
+        revision: getDeterministicP256Revision(props),
       });
       setExtensionBuildSettings(project, target.uuid, {
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: '"AccentColor"',
@@ -342,9 +374,13 @@ const withIosPasskeyAutofill = (config, props = {}) => {
   return config;
 };
 
+// Pins `repositoryURL` to `revision` (a commit SHA) for the extension target. An
+// existing reference to the same repository has its requirement replaced, so a
+// project that was prebuilt while the plugin still tracked a branch is moved to
+// the pin instead of keeping the mutable requirement.
 const addSwiftPackageProduct = (
   project,
-  { targetUuid, packageName, productName, repositoryURL, branch },
+  { targetUuid, packageName, productName, repositoryURL, revision },
 ) => {
   const objects = project.hash.project.objects;
   objects.XCRemoteSwiftPackageReference = objects.XCRemoteSwiftPackageReference || {};
@@ -352,20 +388,23 @@ const addSwiftPackageProduct = (
   objects.PBXBuildFile = objects.PBXBuildFile || {};
 
   const packageComment = `XCRemoteSwiftPackageReference "${packageName}"`;
+  const requirement = {
+    kind: "revision",
+    revision,
+  };
   let packageUuid = Object.keys(objects.XCRemoteSwiftPackageReference).find(
     (key) =>
       !key.endsWith("_comment") &&
       objects.XCRemoteSwiftPackageReference[key].repositoryURL === `"${repositoryURL}"`,
   );
-  if (!packageUuid) {
+  if (packageUuid) {
+    objects.XCRemoteSwiftPackageReference[packageUuid].requirement = requirement;
+  } else {
     packageUuid = project.generateUuid();
     objects.XCRemoteSwiftPackageReference[packageUuid] = {
       isa: "XCRemoteSwiftPackageReference",
       repositoryURL: `"${repositoryURL}"`,
-      requirement: {
-        branch,
-        kind: "branch",
-      },
+      requirement,
     };
     objects.XCRemoteSwiftPackageReference[`${packageUuid}_comment`] = packageComment;
   }
@@ -802,3 +841,6 @@ const withPasskeyAutofill = (config, props = {}) => {
 module.exports = withPasskeyAutofill;
 module.exports.getBiometricRequirement = getBiometricRequirement;
 module.exports.getAaguid = getAaguid;
+module.exports.getDeterministicP256Revision = getDeterministicP256Revision;
+module.exports.addSwiftPackageProduct = addSwiftPackageProduct;
+module.exports.DETERMINISTIC_P256_PACKAGE_REVISION = DETERMINISTIC_P256_PACKAGE_REVISION;

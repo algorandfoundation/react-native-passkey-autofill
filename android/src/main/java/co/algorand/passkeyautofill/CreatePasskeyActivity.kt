@@ -24,6 +24,7 @@ import androidx.credentials.webauthn.AuthenticatorAttestationResponse
 import androidx.credentials.webauthn.FidoPublicKeyCredential
 import androidx.credentials.webauthn.PublicKeyCredentialCreationOptions
 import co.algorand.passkeyautofill.auth.BiometricRequirement
+import co.algorand.passkeyautofill.auth.UserVerification
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.credentials.MasterKeyUnavailableException
@@ -56,6 +57,8 @@ class CreatePasskeyActivity : AppCompatActivity() {
     private var bundleRequestJson: String? = null
     private var request: ProviderCreateCredentialRequest? = null
     private var biometricPromptResult: Any? = null
+    /** The system's Credential Manager prompt ran for this operation and succeeded. */
+    private var systemVerified: Boolean = false
     private var systemUnlockedCipher: javax.crypto.Cipher? = null
     private var isHandling: Boolean = false
 
@@ -77,6 +80,9 @@ class CreatePasskeyActivity : AppCompatActivity() {
             Log.i(TAG, "biometricResult from system: $biometricResult")
             if (biometricResult != null) {
                 this.biometricPromptResult = biometricResult
+                // A result object alone is not verification: the prompt may
+                // have failed or been dismissed.
+                systemVerified = biometricResult.isSuccessful
                 val authResult = biometricResult.authenticationResult
                 Log.i(TAG, "authResult from system: $authResult (${authResult?.javaClass?.name})")
                 
@@ -283,7 +289,9 @@ class CreatePasskeyActivity : AppCompatActivity() {
         isHandling = true
         Log.d(TAG, "handleCreation started, userVerification=$userVerification")
         lifecycleScope.launch {
-            val cipherToUse = systemUnlockedCipher ?: run {
+            // A manual BiometricPrompt this activity showed succeeded.
+            var manualVerified = false
+            var cipherToUse = systemUnlockedCipher ?: run {
                 if (biometricPromptResult != null) {
                     try {
                         val fallback = credentialRepository.getBiometricCipherForEncryption(this@CreatePasskeyActivity, BiometricRequirement.resolve(this@CreatePasskeyActivity))
@@ -296,28 +304,27 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 } else {
                     null
                 }
-            } ?: run {
-                // Only prompt for biometrics if userVerification is "required"
-                // For "preferred" and "discouraged", we can proceed without a manual biometric prompt
-                if (userVerification == "required") {
-                    Log.i(TAG, "userVerification is required, running manual biometrics")
-                    val result = biometrics(true)
-                    Log.d(TAG, "Manual biometrics result: $result")
-                    if (result == null) {
-                        Log.w(TAG, "Biometrics failed or was canceled")
-                        setupUI() // Show UI as fallback
-                        isHandling = false
-                        return@launch
-                    }
-                    result.cryptoObject?.cipher
-                } else {
-                    Log.d(TAG, "userVerification is $userVerification, skipping manual biometrics")
-                    null
-                }
             }
-            
-            Log.d(TAG, "cipherToUse: $cipherToUse")
-            
+
+            // "required" means a verification ceremony MUST run for this
+            // operation. If the system's prompt did not succeed (it was not
+            // shown, failed, or was dismissed), run our own; "preferred" and
+            // "discouraged" proceed without one, and the response says so.
+            if (UserVerification.normalize(userVerification) == UserVerification.REQUIRED && !systemVerified) {
+                Log.i(TAG, "userVerification is required and the system did not verify; running manual biometrics")
+                val result = biometrics(true)
+                if (result == null) {
+                    Log.w(TAG, "Biometrics failed or was canceled")
+                    setupUI() // Show UI as fallback
+                    isHandling = false
+                    return@launch
+                }
+                manualVerified = true
+                cipherToUse = result.cryptoObject?.cipher ?: cipherToUse
+            } else if (!systemVerified) {
+                Log.d(TAG, "userVerification is $userVerification, skipping manual biometrics")
+            }
+
             var finalCipher = cipherToUse
 
             try {
@@ -385,6 +392,7 @@ class CreatePasskeyActivity : AppCompatActivity() {
                     Log.i(TAG, "Key is locked, triggering manual biometric prompt")
                     val result = biometrics(true)
                     if (result != null) {
+                        manualVerified = true
                         finalCipher = result.cryptoObject?.cipher
                         Log.i(TAG, "Retrying save with manual biometric cipher")
                         credentialRepository.saveCredential(this@CreatePasskeyActivity, credential, finalCipher)
@@ -396,14 +404,21 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 }
             }
 
-            Log.d(TAG, "Building AuthenticatorAttestationResponse")
+            // UV reflects what actually happened in this operation. UP stays set:
+            // the user chose this provider's entry in the system chooser (or
+            // tapped Create in our sheet), which is the presence gesture.
+            val verification = UserVerification.outcome(userVerification, systemVerified, manualVerified)
+            check(verification.satisfiesRequest) {
+                "Relying party requires user verification but no verification ceremony completed"
+            }
+            Log.d(TAG, "Building AuthenticatorAttestationResponse (uv=${verification.verified})")
             val response = AuthenticatorAttestationResponse(
                 requestOptions = requestOptions,
                 credentialId = credentialId,
                 credentialPublicKey = credentialRepository.getPublicKeyFromKeyPair(keyPair),
                 origin = credentialRepository.getOrigin(req.callingAppInfo),
                 up = true,
-                uv = true,
+                uv = verification.verified,
                 be = true,
                 bs = true,
                 packageName = req.callingAppInfo.packageName

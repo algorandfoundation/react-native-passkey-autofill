@@ -426,4 +426,79 @@ class KeystoreRecordsTest {
         assertFalse(KeystoreRecords.isPasskeyRecordType("ed25519"))
         assertFalse(KeystoreRecords.isPasskeyRecordType(""))
     }
+
+    // --- Fail-closed master key (F-2026-18982) ------------------------------
+
+    @Test
+    fun aValidMasterKeyPassesTheSealRoundTrip() {
+        val masterKey = ByteArray(KeystoreRecords.MASTER_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
+        KeystoreRecords.verifySealRoundTrip(masterKey)
+    }
+
+    @Test
+    fun aWrongLengthMasterKeyFailsTheSealRoundTrip() {
+        for (size in listOf(0, 7, 16, 31, 33, 64)) {
+            try {
+                KeystoreRecords.verifySealRoundTrip(ByteArray(size) { it.toByte() })
+                throw AssertionError("a $size-byte master key must be rejected")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message!!.contains("${KeystoreRecords.MASTER_KEY_LENGTH} bytes"))
+            }
+        }
+    }
+
+    @Test
+    fun recognisesBothEnvelopeShapesAsSealed() {
+        val masterKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        assertTrue(KeystoreRecords.isSealedEnvelope(KeystoreRecords.sealEnvelope(masterKey, "x")))
+        assertTrue(
+            KeystoreRecords.isSealedEnvelope(
+                legacyFlatRecordPayload(masterKey, JSONObject().put("id", "x").put("type", "hd-derived-p256")),
+            ),
+        )
+        // Bare base64url(JSON) and plain JSON without an envelope are unsealed.
+        assertFalse(KeystoreRecords.isSealedEnvelope(unsealedFlatRecordPayload(JSONObject().put("id", "x"))))
+        assertFalse(KeystoreRecords.isSealedEnvelope("{\"id\":\"x\",\"type\":\"hd-derived-p256\"}"))
+        assertFalse(KeystoreRecords.isSealedEnvelope("not json at all"))
+    }
+
+    /**
+     * The shape the pre-fix `saveCredential` wrote when no master key was
+     * available: `base64url(JSON.stringify(KeyData))`, no envelope at all.
+     */
+    private fun unsealedFlatRecordPayload(keyData: JSONObject): String =
+        Base64.encodeToString(keyData.toString().toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
+
+    @Test
+    fun findsOnlyThisModulesUnsealedLegacyRecords() {
+        val masterKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val ourUnsealed = JSONObject()
+            .put("id", "our-unsealed")
+            .put("type", "hd-derived-p256")
+            .put("privateKey", JSONArray(listOf(1, 2, 3)))
+        val ourUnsealedPlainJson = JSONObject()
+            .put("id", "our-unsealed-json")
+            .put("type", "xhd-derived-p256")
+        val store = mapOf(
+            // The exposure: our passkey, private key in the clear.
+            "our-unsealed" to unsealedFlatRecordPayload(ourUnsealed),
+            "our-unsealed-json" to ourUnsealedPlainJson.toString(),
+            // Already sealed — nothing to do.
+            "our-sealed" to legacyFlatRecordPayload(
+                masterKey,
+                JSONObject().put("id", "our-sealed").put("type", "hd-derived-p256"),
+            ),
+            // The wallet's own unsealed record is not ours to rewrite.
+            "wallet-seed" to unsealedFlatRecordPayload(JSONObject().put("id", "wallet-seed").put("type", "seed")),
+            // Split layout: metadata is plaintext BY DESIGN and carries no material.
+            KeystoreRecords.metadataKey("split") to JSONObject().put("id", "split").put("type", "hd-derived-p256").toString(),
+            KeystoreRecords.materialKey("split") to KeystoreRecords.sealMaterial(masterKey, byteArrayOf(9)),
+            // Garbage must be skipped, not crash the scan.
+            "garbage" to "%%% not base64 or json %%%",
+        )
+
+        val unsealed = KeystoreRecords.unsealedPasskeyRecordKeys(store.keys.toTypedArray()) { store[it] }
+
+        assertEquals(setOf("our-unsealed", "our-unsealed-json"), unsealed.toSet())
+    }
 }

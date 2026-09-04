@@ -111,7 +111,9 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
     ): BeginCreateCredentialResponse {
         val createEntries: MutableList<CreateEntry> = mutableListOf()
         
-        // Ensure we have a master key available before offering to create a passkey
+        // Never offer to create a passkey unless the master key reads back AND
+        // proves it can seal/open a payload: saveCredential fails closed without
+        // it, so an entry here would only lead to a guaranteed failure.
         if (!credentialRepository.isMasterKeyAvailable(this)) {
             return BeginCreateCredentialResponse(createEntries)
         }

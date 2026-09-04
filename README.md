@@ -118,7 +118,9 @@ Call `refreshCredentialIdentities()` after creating, importing, deleting, or res
 import ReactNativePasskeyAutofill from "@algorandfoundation/react-native-passkey-autofill";
 
 // 1. Set the master key for encryption (raw bytes — never a hex string, so
-//    the secret isn't materialized as a non-zeroable JS string)
+//    the secret isn't materialized as a non-zeroable JS string). The promise
+//    REJECTS if the key cannot be stored and verified; until it resolves no
+//    passkey can be created, so surface the failure rather than continuing.
 await ReactNativePasskeyAutofill.setMasterKey(masterKeyBytes);
 
 // 2. Set the P-256 main key ID (parent secret for passkey derivation).

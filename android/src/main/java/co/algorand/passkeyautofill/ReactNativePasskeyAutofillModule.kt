@@ -1,5 +1,6 @@
 package co.algorand.passkeyautofill
 
+import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import co.algorand.passkeyautofill.credentials.CredentialRepository
@@ -13,6 +14,13 @@ import android.provider.Settings
 import android.util.Log
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
+
+/**
+ * Rejects the `setMasterKey` promise with code `ERR_MASTER_KEY` when the key
+ * could not be stored and verified. The wallet must treat this as "no passkey
+ * can be created or asserted on this device" rather than continue.
+ */
+class MasterKeyException(message: String, cause: Throwable? = null) : CodedException(message, cause)
 
 class ReactNativePasskeyAutofillModule : Module() {
   private val credentialRepository = CredentialRepository()
@@ -45,12 +53,17 @@ class ReactNativePasskeyAutofillModule : Module() {
 
     Events("onPasskeyAdded", "onPasskeyAuthenticated")
 
+    // Fails closed: every failure to store and verify the key rejects the
+    // promise. Logging and resolving would let the wallet believe the key is in
+    // place while credential creation is impossible.
     AsyncFunction("setMasterKey") { secret: ByteArray ->
       val context = (appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context
-      if (context != null) {
+        ?: throw MasterKeyException("Could not get context to save master key")
+      try {
         credentialRepository.saveMasterKey(context, secret)
-      } else {
-        Log.e(CredentialRepository.TAG, "Could not get context to save master key")
+      } catch (e: Exception) {
+        Log.e(CredentialRepository.TAG, "Failed to save master key", e)
+        throw MasterKeyException(e.message ?: "Failed to save master key", e)
       }
     }
 

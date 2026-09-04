@@ -72,6 +72,11 @@ As this module handles sensitive information (Passkeys), keys and secrets are ha
 
 Encryption is a precondition, not a best effort. On Android, `setMasterKey` rejects its promise (code `ERR_MASTER_KEY`) if the key is not 32 bytes, cannot be stored in the AndroidKeyStore-backed Keychain, does not read back, or fails a seal/open round trip; nothing is silently logged and swallowed. `saveCredential` refuses to write a record when no master key is available (it throws `MasterKeyUnavailableException` and the create flow returns a `CreateCredentialUnknownException` to the relying party), so a P-256 private key is never persisted without AES-256-GCM. The Credential Provider service only offers `CreateEntry` / credential entries once the master key both reads back and passes the round trip.
 
+### User verification and the UV flag
+
+The `UV` bit in `authenticatorData` is only set when a user-verification ceremony ran for that operation (`auth/UserVerification.kt`). Both activities track whether the system's Credential Manager prompt reported success and whether a `BiometricPrompt` they showed succeeded, and derive the flag from those two facts when the response is built. A request with `userVerification: "required"` runs a manual prompt whenever the system did not verify, and fails if no ceremony completes; `preferred` and `discouraged` may proceed without one, with `UV` clear. `UP` stays set, since choosing the entry in the system chooser is the presence gesture.
+
+
 ## End-to-End Tests
 
 The `e2e/` workspace drives the `example/` app with Appium 2 + WebdriverIO, executed through Jest. The Android job uses the UiAutomator2 driver; the iOS job uses XCUITest. The happy-path spec mirrors the example and exercises passkey registration and assertion against `https://debug.liquidauth.com`. See [`e2e/README.md`](./e2e/README.md) for local usage and the [`E2E` workflow](./.github/workflows/e2e.yml) for CI.

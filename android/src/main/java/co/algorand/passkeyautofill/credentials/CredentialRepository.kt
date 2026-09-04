@@ -89,19 +89,24 @@ interface CredentialRepository {
     fun saveCredential(context: Context, credential: Credential, biometricCipher: Cipher? = null)
     fun generateCredentialId(keyPair: KeyPair): ByteArray
     fun getKeyPair(context: Context, credentialId: ByteArray, biometricCipher: Cipher? = null): KeyPair?
-    fun createDeterministicKeyPair(context: Context, origin: String, userHandle: String, biometricCipher: Cipher? = null): KeyPair
 
     /**
-     * Derives the domain (passkey) key for `origin`/`userHandle`, reporting which
-     * parent it used so the caller can stamp it onto the credential.
+     * Derives the domain (passkey) key for `origin` and `identity`, reporting
+     * which parent it used so the caller can stamp it onto the credential.
      *
+     * @param identity the credential's derivation identity as returned by
+     *   [PasskeyDerivation.identity] — the relying party's `user.id` for a
+     *   canonical credential, the lowercased legacy label for an old one. It is
+     *   passed to the derivation VERBATIM: it is already normalised and
+     *   case-folded as its version requires, and `user.id` is opaque,
+     *   case-significant RP-owned bytes, so nothing here may lowercase it.
      * @param requestedScheme the scheme an EXISTING credential is pinned to;
      *   `null` for a new credential, which then prefers the dp256 main key.
      */
     fun createDomainKeyPair(
         context: Context,
         origin: String,
-        userHandle: String,
+        identity: String,
         requestedScheme: String? = null,
     ): DerivedDomainKeyPair
     fun getOrigin(info: CallingAppInfo): String
@@ -584,13 +589,16 @@ class Repository() : CredentialRepository {
         // A credential the wallet derived itself carries no material at all (a
         // domain key is metadata plus a public key: it is re-derivable by
         // definition), and neither does one whose biometric-wrapped material we
-        // could not open. Re-derive from the parent it is pinned to.
-        if (credential.origin.isEmpty() || credential.userHandle.isEmpty()) return null
+        // could not open. Re-derive from the parent AND the identity it is
+        // pinned to — its stored derivationVersion decides whether that is the
+        // relying party's user.id or the legacy label.
+        val identity = PasskeyDerivation.identity(credential)
+        if (credential.origin.isEmpty() || identity.isEmpty()) return null
         return try {
             createDomainKeyPair(
                 context,
                 credential.origin,
-                credential.userHandle,
+                identity,
                 credential.derivationScheme ?: KeystoreRecords.SCHEME_BIP32_ED25519,
             ).keyPair
         } catch (e: Exception) {
@@ -599,20 +607,13 @@ class Repository() : CredentialRepository {
         }
     }
 
-    override fun createDeterministicKeyPair(
-        context: Context,
-        origin: String,
-        userHandle: String,
-        biometricCipher: Cipher?
-    ): KeyPair = createDomainKeyPair(context, origin, userHandle).keyPair
-
     override fun createDomainKeyPair(
         context: Context,
         origin: String,
-        userHandle: String,
+        identity: String,
         requestedScheme: String?,
     ): DerivedDomainKeyPair {
-        Log.d(CredentialRepository.TAG, "createDomainKeyPair for origin: $origin, userHandle: $userHandle, scheme: ${requestedScheme ?: "preferred"}")
+        Log.d(CredentialRepository.TAG, "createDomainKeyPair for origin: $origin, scheme: ${requestedScheme ?: "preferred"}")
         val resolved = resolveParentSecret(context, requestedScheme)
         if (resolved is ParentSecretResult.MasterKeyUnavailable) {
             // Typed so the create flow can report a definite failure to the
@@ -626,7 +627,8 @@ class Repository() : CredentialRepository {
         val parent = resolved.secret
         Log.d(CredentialRepository.TAG, "deriving from parent ${parent.keyId} (${parent.scheme}, ${parent.bytes.size} bytes)")
         return DerivedDomainKeyPair(
-            keyPair = dP256.genDomainSpecificKeypair(parent.bytes, origin, userHandle.lowercase()),
+            // `identity` verbatim: see the interface contract.
+            keyPair = dP256.genDomainSpecificKeypair(parent.bytes, origin, identity),
             parentKeyId = parent.keyId,
             derivationScheme = parent.scheme,
         )

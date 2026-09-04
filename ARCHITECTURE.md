@@ -72,6 +72,10 @@ As this module handles sensitive information (Passkeys), keys and secrets are ha
 
 Encryption is a precondition, not a best effort. On Android, `setMasterKey` rejects its promise (code `ERR_MASTER_KEY`) if the key is not 32 bytes, cannot be stored in the AndroidKeyStore-backed Keychain, does not read back, or fails a seal/open round trip; nothing is silently logged and swallowed. `saveCredential` refuses to write a record when no master key is available (it throws `MasterKeyUnavailableException` and the create flow returns a `CreateCredentialUnknownException` to the relying party), so a P-256 private key is never persisted without AES-256-GCM. The Credential Provider service only offers `CreateEntry` / credential entries once the master key both reads back and passes the round trip. When a master key is stored, any of this module's own legacy records that an older build wrote unsealed are re-sealed under it; the wallet's records in the shared MMKV instance are never touched.
 
+### Derivation identity
+
+Everything deterministic about a passkey (its P-256 key and its PRF secret) is keyed on `origin` and an identity string. On Android that identity is chosen by `credentials/PasskeyDerivation.kt` and stamped on the record as `metadata.derivationVersion`: new credentials derive from the relying party's opaque `user.id` (normalised to unpadded base64url, case preserved), never from `user.name`, which is a display attribute that is neither stable nor unique and must not be case-folded. Records without a version read back as the legacy label derivation so existing credentials keep re-deriving the same key. The identity is passed to the key and PRF derivations verbatim; nothing downstream lowercases it.
+
 ## End-to-End Tests
 
 The `e2e/` workspace drives the `example/` app with Appium 2 + WebdriverIO, executed through Jest. The Android job uses the UiAutomator2 driver; the iOS job uses XCUITest. The happy-path spec mirrors the example and exercises passkey registration and assertion against `https://debug.liquidauth.com`. See [`e2e/README.md`](./e2e/README.md) for local usage and the [`E2E` workflow](./.github/workflows/e2e.yml) for CI.

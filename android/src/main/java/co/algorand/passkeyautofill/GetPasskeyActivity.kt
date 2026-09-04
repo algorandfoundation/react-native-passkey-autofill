@@ -28,6 +28,7 @@ import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.credentials.KeystoreRecords
 import co.algorand.passkeyautofill.credentials.ParentSecretResult
+import co.algorand.passkeyautofill.credentials.PasskeyDerivation
 import co.algorand.passkeyautofill.credentials.RelyingParty
 import co.algorand.passkeyautofill.utils.PasskeyUtils
 import java.security.KeyPair
@@ -598,10 +599,12 @@ class GetPasskeyActivity : AppCompatActivity() {
                     if (parent !is ParentSecretResult.Available) {
                         Log.w(TAG, "PRF input present but parent secret unavailable (${parent.reason}); skipping PRF output")
                     } else {
+                        // Same identity the signing key is derived from, per the
+                        // credential's stamped derivation version.
                         val credRandom = Prf.credRandom(
                             hdRootSecret = parent.secret.bytes,
                             relyingPartyIdentifier = displayOrigin,
-                            userHandle = dbCred.userHandle,
+                            identity = PasskeyDerivation.identity(dbCred),
                         )
                         val first = Prf.evaluate(credRandom, prfInput.first, prfInput.alreadyHashed)
                         val second = prfInput.second?.let { Prf.evaluate(credRandom, it, prfInput.alreadyHashed) }

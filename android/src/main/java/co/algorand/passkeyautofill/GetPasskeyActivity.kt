@@ -28,6 +28,7 @@ import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.credentials.KeystoreRecords
 import co.algorand.passkeyautofill.credentials.ParentSecretResult
+import co.algorand.passkeyautofill.credentials.RelyingParty
 import co.algorand.passkeyautofill.utils.PasskeyUtils
 import java.security.KeyPair
 import java.security.MessageDigest
@@ -498,6 +499,20 @@ class GetPasskeyActivity : AppCompatActivity() {
             Log.d(TAG, "Getting credential metadata from repository")
             val dbCred = credentialRepository.getCredentialMetadata(this@GetPasskeyActivity, credId)
                 ?: throw IllegalStateException("Credential not found")
+
+            // The chooser is RP-scoped, but the pending intent carries whatever
+            // credential id it was built with: re-establish the invariant here,
+            // before any private material is loaded.
+            val requestedRpId = RelyingParty.effectiveRpId(passkeyReqJson, origin)
+            if (requestedRpId == null || !RelyingParty.matches(dbCred.origin, requestedRpId)) {
+                Log.e(TAG, "Credential is not scoped to the requesting relying party; refusing to sign")
+                setupErrorUI(
+                    "This passkey was created for a different site or app and cannot be used here.",
+                    allowRetry = false,
+                )
+                isHandling = false
+                return@launch
+            }
 
             Log.d(TAG, "Building AuthenticatorAssertionResponse")
             val response = AuthenticatorAssertionResponse(

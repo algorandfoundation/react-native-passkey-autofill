@@ -226,11 +226,18 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     clientDataHash: Data,
     relyingPartyIdentifier: String
   ) {
+    // `credential` was selected from the metadata-only list. Its private key is
+    // opened here, after `evaluatePolicy` succeeded, for this one record only.
+    guard let signingCredential = store?.signingCredential(id: credential.credentialIdData) else {
+      isCompletingAssertion = false
+      cancel(code: .credentialIdentityNotFound, message: "Credential not found.")
+      return
+    }
     do {
       let authenticatorData = WebAuthn.authenticatorDataForAssertion(
         relyingPartyIdentifier: relyingPartyIdentifier
       )
-      let signature = try credential.sign(authenticatorData + clientDataHash)
+      let signature = try signingCredential.sign(authenticatorData + clientDataHash)
       let assertionCredential = ASPasskeyAssertionCredential(
         userHandle: credential.userHandleData,
         relyingParty: relyingPartyIdentifier,

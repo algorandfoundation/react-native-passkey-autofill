@@ -492,27 +492,12 @@ class GetPasskeyActivity : AppCompatActivity() {
 
             val clientDataHash = systemClientDataHash ?: MessageDigest.getInstance("SHA-256").digest(clientDataJSONString.toByteArray(Charsets.UTF_8))
 
-            Log.d(TAG, "Getting credential from repository")
-            val dbCred = try {
-                credentialRepository.getCredential(this@GetPasskeyActivity, credId, finalCipher)
-                    ?: throw IllegalStateException("Credential not found")
-            } catch (e: Exception) {
-                if (e.message?.contains("user not authenticated", ignoreCase = true) == true || 
-                    e.cause?.message?.contains("user not authenticated", ignoreCase = true) == true) {
-                    Log.i(TAG, "Key is locked, triggering manual biometric prompt")
-                    val result = biometrics(biometricIv)
-                    if (result != null) {
-                        finalCipher = result.cryptoObject?.cipher
-                        Log.i(TAG, "Retrying getCredential with manual biometric cipher")
-                        credentialRepository.getCredential(this@GetPasskeyActivity, credId, finalCipher)
-                            ?: throw IllegalStateException("Credential not found after manual prompt")
-                    } else {
-                        throw e
-                    }
-                } else {
-                    throw e
-                }
-            }
+            // Metadata only: everything the response needs before signing (user
+            // handle, derivation pins) is read without touching the private key.
+            // The key itself is materialised exactly once, in getKeyPair below.
+            Log.d(TAG, "Getting credential metadata from repository")
+            val dbCred = credentialRepository.getCredentialMetadata(this@GetPasskeyActivity, credId)
+                ?: throw IllegalStateException("Credential not found")
 
             Log.d(TAG, "Building AuthenticatorAssertionResponse")
             val response = AuthenticatorAssertionResponse(
@@ -533,8 +518,9 @@ class GetPasskeyActivity : AppCompatActivity() {
                 credentialRepository.getKeyPair(this@GetPasskeyActivity, credId, finalCipher)
                     ?: throw IllegalStateException("No keypair found")
             } catch (e: Exception) {
-                // If we get here, it means getCredential succeeded but something went wrong with getKeyPair.
-                // We shouldn't need a second prompt here if we already got the cipher, but for safety:
+                // The metadata read above cannot trip a user-authentication
+                // requirement; opening the private material here can, when the
+                // record is biometric-wrapped and the cipher was not yet unlocked.
                 if (e.message?.contains("user not authenticated", ignoreCase = true) == true || 
                     e.cause?.message?.contains("user not authenticated", ignoreCase = true) == true) {
                      Log.i(TAG, "Key is locked for signing, triggering manual biometric prompt")

@@ -41,11 +41,21 @@ class CredentialRepositoryTest {
 
     // --- Fail-closed master key (F-2026-18982) ------------------------------
 
+    /**
+     * `getCredential` takes the RAW credential id and base64-encodes it before
+     * the MMKV lookup, while `saveCredential` stores under the base64 id the
+     * create flow hands it. Tests therefore plant/save under [base64Id] and
+     * read back with the raw bytes, exactly like the activity does.
+     */
+    private fun base64Id(rawId: ByteArray): String =
+        android.util.Base64.encodeToString(rawId, android.util.Base64.NO_WRAP)
+
     @Test
     fun saveCredentialWithoutAMasterKeyThrowsAndWritesNothing() {
         assertFalse(repository.isMasterKeyAvailable(context))
+        val rawId = "no-master-key".toByteArray()
         val credential = Credential(
-            credentialId = "no-master-key",
+            credentialId = base64Id(rawId),
             origin = "https://example.com",
             userHandle = "user-handle",
             userId = "user-id",
@@ -61,8 +71,8 @@ class CredentialRepositoryTest {
             // expected
         }
 
-        assertFalse(passkeysMMKV().containsKey("no-master-key"))
-        assertNull(repository.getCredential(context, "no-master-key".toByteArray()))
+        assertFalse(passkeysMMKV().containsKey(base64Id(rawId)))
+        assertNull(repository.getCredential(context, rawId))
     }
 
     @Test
@@ -105,9 +115,11 @@ class CredentialRepositoryTest {
     @Test
     fun saveMasterKeyResealsRecordsAnOlderBuildLeftUnsealed() {
         // Plant exactly what the pre-fix fallback wrote: bare base64url(JSON)
-        // carrying the private key, keyed by the bare credential id.
+        // carrying the private key, keyed by the (base64) credential id.
+        val rawId = "left-unsealed".toByteArray()
+        val id = base64Id(rawId)
         val keyData = JSONObject()
-            .put("id", "left-unsealed")
+            .put("id", id)
             .put("type", "hd-derived-p256")
             .put("privateKey", JSONArray(listOf(1, 2, 3)))
             .put("publicKey", JSONArray(listOf(4, 5, 6)))
@@ -116,18 +128,18 @@ class CredentialRepositoryTest {
             keyData.toString().toByteArray(Charsets.UTF_8),
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP,
         )
-        passkeysMMKV().encode("left-unsealed", unsealed)
+        passkeysMMKV().encode(id, unsealed)
 
         val masterKey = ByteArray(32) { (it * 3).toByte() }
         repository.saveMasterKey(context, masterKey)
 
-        val stored = passkeysMMKV().decodeString("left-unsealed")!!
+        val stored = passkeysMMKV().decodeString(id)!!
         assertTrue(KeystoreRecords.isSealedEnvelope(stored))
         assertFalse(stored.contains("privateKey"))
         // And the record is still readable through the normal path.
         val reopened = KeystoreRecords.decodeLegacyRecord(stored, masterKey)
-        assertEquals("left-unsealed", reopened.getString("id"))
-        assertEquals("https://legacy.example", repository.getCredential(context, "left-unsealed".toByteArray())?.origin)
+        assertEquals(id, reopened.getString("id"))
+        assertEquals("https://legacy.example", repository.getCredential(context, rawId)?.origin)
     }
 
     @Test

@@ -1,6 +1,5 @@
 package co.algorand.passkeyautofill.utils
 
-import android.util.Log
 import javax.crypto.Cipher
 
 object PasskeyUtils {
@@ -18,7 +17,7 @@ object PasskeyUtils {
     fun extractCipher(authResult: Any?): Cipher? {
         if (authResult == null) return null
         return try {
-            Log.i(TAG, "Attempting to extract cipher from: ${authResult.javaClass.name}")
+            PasskeyLog.i(TAG, "Attempting to extract cipher from: ${authResult.javaClass.name}")
             
             // 1. Try direct getCryptoObject (works for androidx.biometric or platform)
             var cryptoObject = authResult.javaClass.methods.find { it.name == "getCryptoObject" }?.invoke(authResult)
@@ -36,7 +35,7 @@ object PasskeyUtils {
                         if (method != null) {
                             val innerResult = method.invoke(authResult)
                             if (innerResult != null && innerResult !== authResult) {
-                                Log.i(TAG, "Unwrapped via $methodName to ${innerResult.javaClass.name}")
+                                PasskeyLog.i(TAG, "Unwrapped via $methodName to ${innerResult.javaClass.name}")
                                 cryptoObject = innerResult.javaClass.methods.find { it.name == "getCryptoObject" }?.invoke(innerResult)
                                 if (cryptoObject != null) break
                             }
@@ -54,7 +53,7 @@ object PasskeyUtils {
                         field.isAccessible = true
                         val innerResult = field.get(authResult)
                         if (innerResult != null) {
-                            Log.i(TAG, "Unwrapped via field $fieldName to ${innerResult.javaClass.name}")
+                            PasskeyLog.i(TAG, "Unwrapped via field $fieldName to ${innerResult.javaClass.name}")
                             cryptoObject = innerResult.javaClass.methods.find { it.name == "getCryptoObject" }?.invoke(innerResult)
                             if (cryptoObject != null) break
                         }
@@ -74,7 +73,7 @@ object PasskeyUtils {
                             if (getCrypto != null) {
                                 cryptoObject = getCrypto.invoke(candidate)
                                 if (cryptoObject != null) {
-                                    Log.i(TAG, "Found cryptoObject via ${method.name} -> ${candidate.javaClass.name}")
+                                    PasskeyLog.i(TAG, "Found cryptoObject via ${method.name} -> ${candidate.javaClass.name}")
                                     break
                                 }
                             }
@@ -93,7 +92,7 @@ object PasskeyUtils {
                         if (getCrypto != null) {
                             cryptoObject = getCrypto.invoke(candidate)
                             if (cryptoObject != null) {
-                                Log.i(TAG, "Found cryptoObject in field ${field.name}")
+                                PasskeyLog.i(TAG, "Found cryptoObject in field ${field.name}")
                                 break
                             }
                         }
@@ -102,17 +101,17 @@ object PasskeyUtils {
             }
             
             if (cryptoObject == null) {
-                Log.w(TAG, "Could not find CryptoObject in ${authResult.javaClass.name}")
+                PasskeyLog.w(TAG, "Could not find CryptoObject in ${authResult.javaClass.name}")
                 return null
             }
             
             // 5. Finally extract the Cipher from the CryptoObject
             val getCipher = cryptoObject.javaClass.methods.find { it.name == "getCipher" }
             val cipher = getCipher?.invoke(cryptoObject) as? Cipher
-            Log.i(TAG, "Extracted cipher: $cipher")
+            PasskeyLog.i(TAG, "Extracted cipher: present=${cipher != null}")
             cipher
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to extract cipher via reflection", e)
+            PasskeyLog.w(TAG, "Failed to extract cipher via reflection", e)
             null
         }
     }

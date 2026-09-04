@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Log
+import co.algorand.passkeyautofill.utils.PasskeyLog
 import androidx.annotation.RequiresApi
 import androidx.credentials.provider.CallingAppInfo
 import com.tencent.mmkv.MMKV
@@ -278,7 +278,7 @@ class Repository() : CredentialRepository {
     }
 
     override fun saveCredential(context: Context, credential: Credential, biometricCipher: Cipher?) {
-        Log.d(CredentialRepository.TAG, "saveCredential started for ${credential.origin}, userHandle: ${credential.userHandle}")
+        PasskeyLog.d(CredentialRepository.TAG, "saveCredential started")
         val mmkv = getPasskeysMMKV(context)
         
         // 1. Create KeyData matching @algorandfoundation/keystore
@@ -292,14 +292,14 @@ class Repository() : CredentialRepository {
         
         val privateKeyBytes = AndroidBase64.decode(credential.privateKey, AndroidBase64.DEFAULT)
         if (biometricCipher != null) {
-            Log.d(CredentialRepository.TAG, "Using biometricCipher for encryption")
+            PasskeyLog.d(CredentialRepository.TAG, "Using biometricCipher for encryption")
             val encryptedBytes = biometricCipher.doFinal(privateKeyBytes)
             val encJson = JSONObject()
             encJson.put("iv", AndroidBase64.encodeToString(biometricCipher.iv, AndroidBase64.NO_WRAP))
             encJson.put("data", AndroidBase64.encodeToString(encryptedBytes, AndroidBase64.NO_WRAP))
             keyData.put("privateKeyEnc", encJson)
         } else {
-            Log.d(CredentialRepository.TAG, "No biometricCipher, saving privateKey in plain (base64 in JSON)")
+            PasskeyLog.d(CredentialRepository.TAG, "No biometricCipher, saving privateKey in plain (base64 in JSON)")
             keyData.put("privateKey", JSONArray(privateKeyBytes.map { it.toInt() and 0xFF }))
         }
 
@@ -399,14 +399,14 @@ class Repository() : CredentialRepository {
         val privateKey = when {
             !includeMaterial -> ""
             encJson != null && biometricCipher != null -> {
-                Log.d(CredentialRepository.TAG, "Decrypting privateKey with biometricCipher")
+                PasskeyLog.d(CredentialRepository.TAG, "Decrypting privateKey with biometricCipher")
                 val data = AndroidBase64.decode(encJson.getString("data"), AndroidBase64.DEFAULT)
                 AndroidBase64.encodeToString(biometricCipher.doFinal(data), AndroidBase64.DEFAULT)
             }
             json.has("privateKey") ->
                 AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT)
             else -> {
-                Log.w(CredentialRepository.TAG, "No privateKey found in JSON")
+                PasskeyLog.w(CredentialRepository.TAG, "No privateKey found in JSON")
                 ""
             }
         }
@@ -480,7 +480,7 @@ class Repository() : CredentialRepository {
         includeMaterial: Boolean,
     ): Credential? {
         val id = AndroidBase64.encodeToString(credentialId, AndroidBase64.DEFAULT).trim()
-        Log.d(CredentialRepository.TAG, "getCredential started for id: $id")
+        PasskeyLog.d(CredentialRepository.TAG, "readCredential started (includeMaterial=$includeMaterial)")
         val mmkv = getPasskeysMMKV(context)
 
         // Split layout first: its metadata half is plaintext, so it reads without
@@ -491,16 +491,16 @@ class Repository() : CredentialRepository {
             try {
                 credentialFromMetadataRecord(JSONObject(plaintext))?.let { return it }
             } catch (e: Exception) {
-                Log.w(CredentialRepository.TAG, "Unreadable metadata record for $candidate", e)
+                PasskeyLog.w(CredentialRepository.TAG, "Unreadable metadata record for a credential id candidate", e)
             }
         }
 
         val payload = mmkv.decodeString(id) ?: run {
-            Log.w(CredentialRepository.TAG, "No payload found for id: $id")
+            PasskeyLog.w(CredentialRepository.TAG, "No payload found for credential id")
             return null
         }
         val masterKey = getMasterKey(context) ?: run {
-            Log.e(CredentialRepository.TAG, "Master key not found")
+            PasskeyLog.e(CredentialRepository.TAG, "Master key not found")
             return null
         }
         return try {
@@ -572,11 +572,11 @@ class Repository() : CredentialRepository {
 
                     KeyPair(publicKey, privateKey)
                 } else {
-                    Log.e(CredentialRepository.TAG, "Unrecognized key format: publicKey size=${publicKeyBytes.size}", e)
+                    PasskeyLog.e(CredentialRepository.TAG, "Unrecognized key format: publicKey size=${publicKeyBytes.size}", e)
                     null
                 }
             } catch (e2: Exception) {
-                Log.e(CredentialRepository.TAG, "Failed to restore key from raw bytes", e2)
+                PasskeyLog.e(CredentialRepository.TAG, "Failed to restore key from raw bytes", e2)
                 null
             }
         }
@@ -602,7 +602,7 @@ class Repository() : CredentialRepository {
                 credential.derivationScheme ?: KeystoreRecords.SCHEME_BIP32_ED25519,
             ).keyPair
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to re-derive key pair for ${credential.credentialId}", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to re-derive key pair for credential", e)
             null
         }
     }
@@ -613,7 +613,7 @@ class Repository() : CredentialRepository {
         identity: String,
         requestedScheme: String?,
     ): DerivedDomainKeyPair {
-        Log.d(CredentialRepository.TAG, "createDomainKeyPair for origin: $origin, scheme: ${requestedScheme ?: "preferred"}")
+        PasskeyLog.d(CredentialRepository.TAG, "createDomainKeyPair (scheme: ${requestedScheme ?: "preferred"})")
         val resolved = resolveParentSecret(context, requestedScheme)
         if (resolved is ParentSecretResult.MasterKeyUnavailable) {
             // Typed so the create flow can report a definite failure to the
@@ -625,7 +625,7 @@ class Repository() : CredentialRepository {
             throw IllegalStateException("Cannot derive a passkey: ${resolved.reason}")
         }
         val parent = resolved.secret
-        Log.d(CredentialRepository.TAG, "deriving from parent ${parent.keyId} (${parent.scheme}, ${parent.bytes.size} bytes)")
+        PasskeyLog.d(CredentialRepository.TAG, "deriving from parent ${parent.keyId} (${parent.scheme}, ${parent.bytes.size} bytes)")
         return DerivedDomainKeyPair(
             // `identity` verbatim: see the interface contract.
             keyPair = dP256.genDomainSpecificKeypair(parent.bytes, origin, identity),
@@ -688,7 +688,7 @@ class Repository() : CredentialRepository {
             return try {
                 JSONObject(plaintext)
             } catch (e: Exception) {
-                Log.w(CredentialRepository.TAG, "Unreadable metadata record for $id", e)
+                PasskeyLog.w(CredentialRepository.TAG, "Unreadable metadata record for $id", e)
                 null
             }
         }
@@ -696,7 +696,7 @@ class Repository() : CredentialRepository {
         return try {
             KeystoreRecords.decodeLegacyRecord(legacy, masterKey)
         } catch (e: Exception) {
-            Log.w(CredentialRepository.TAG, "Unreadable legacy record for $id", e)
+            PasskeyLog.w(CredentialRepository.TAG, "Unreadable legacy record for $id", e)
             null
         }
     }
@@ -711,7 +711,7 @@ class Repository() : CredentialRepository {
             return try {
                 KeystoreRecords.openMaterial(masterKey, sealed)
             } catch (e: Exception) {
-                Log.w(CredentialRepository.TAG, "Failed to open material for $id", e)
+                PasskeyLog.w(CredentialRepository.TAG, "Failed to open material for $id", e)
                 null
             }
         }
@@ -719,7 +719,7 @@ class Repository() : CredentialRepository {
         return try {
             KeystoreRecords.materialFromLegacyRecord(KeystoreRecords.decodeLegacyRecord(legacy, masterKey))
         } catch (e: Exception) {
-            Log.w(CredentialRepository.TAG, "Failed to read legacy material for $id", e)
+            PasskeyLog.w(CredentialRepository.TAG, "Failed to read legacy material for $id", e)
             null
         }
     }
@@ -764,7 +764,7 @@ class Repository() : CredentialRepository {
             val decodedBytes = AndroidBase64.decode(payload, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
             return JSONObject(String(decodedBytes, Charsets.UTF_8))
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to decode payload", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to decode payload", e)
             throw e
         }
     }
@@ -806,7 +806,7 @@ class Repository() : CredentialRepository {
                 mmkv.decodeString(it)
             }
             if (keys.isEmpty()) return
-            Log.w(CredentialRepository.TAG, "Re-sealing ${keys.size} passkey record(s) stored without encryption")
+            PasskeyLog.w(CredentialRepository.TAG, "Re-sealing ${keys.size} passkey record(s) stored without encryption")
             for (key in keys) {
                 val payload = mmkv.decodeString(key) ?: continue
                 // The envelope's plaintext is base64url(JSON); a record stored as
@@ -817,11 +817,11 @@ class Repository() : CredentialRepository {
                     payload
                 }
                 if (!mmkv.encode(key, KeystoreRecords.sealEnvelope(masterKey, plaintext))) {
-                    Log.e(CredentialRepository.TAG, "Failed to re-seal passkey record $key")
+                    PasskeyLog.e(CredentialRepository.TAG, "Failed to re-seal a passkey record")
                 }
             }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to re-seal unsealed passkey records", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to re-seal unsealed passkey records", e)
         }
     }
 
@@ -836,7 +836,7 @@ class Repository() : CredentialRepository {
                 null
             }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to get master key from Keychain", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to get master key from Keychain", e)
             null
         }
     }
@@ -892,7 +892,7 @@ class Repository() : CredentialRepository {
             KeystoreRecords.verifySealRoundTrip(masterKey)
             true
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Master key present but cannot seal/open a payload", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Master key present but cannot seal/open a payload", e)
             false
         }
     }
@@ -951,7 +951,7 @@ class Repository() : CredentialRepository {
             ) { mmkvPasskeys.decodeString(it) }
             removable.forEach { mmkvPasskeys.removeValueForKey(it) }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Error clearing credentials and secrets", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Error clearing credentials and secrets", e)
         }
     }
 
@@ -967,12 +967,12 @@ class Repository() : CredentialRepository {
                 masterKey = getMasterKey(context),
             ) { mmkvPasskeys.decodeString(it) }
             if (removable.isEmpty()) {
-                Log.w(CredentialRepository.TAG, "deleteCredential: no passkey record owned by this module matches; nothing removed")
+                PasskeyLog.w(CredentialRepository.TAG, "deleteCredential: no passkey record owned by this module matches; nothing removed")
                 return
             }
             removable.forEach { mmkvPasskeys.removeValueForKey(it) }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Error deleting credential", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Error deleting credential", e)
         }
     }
 
@@ -995,7 +995,7 @@ class Repository() : CredentialRepository {
             )
             mmkv.encode(id, KeystoreRecords.sealEnvelope(masterKey, base64urlJson))
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to record credential usage", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to record credential usage", e)
         }
     }
 
@@ -1042,7 +1042,7 @@ class Repository() : CredentialRepository {
         if (keyStore.containsAlias(CredentialRepository.BIOMETRIC_KEY_ALIAS) &&
             storedLevel != requirement.name
         ) {
-            Log.i(CredentialRepository.TAG, "Biometric requirement changed ($storedLevel -> ${requirement.name}); regenerating key")
+            PasskeyLog.i(CredentialRepository.TAG, "Biometric requirement changed ($storedLevel -> ${requirement.name}); regenerating key")
             keyStore.deleteEntry(CredentialRepository.BIOMETRIC_KEY_ALIAS)
         }
 
@@ -1096,7 +1096,7 @@ class Repository() : CredentialRepository {
         } catch (e: NoSuchProviderException) {
             // Extremely unlikely on stock Android, but fall back to provider discovery
             // by key rather than by name so we never hand the key to BouncyCastle.
-            Log.w(CredentialRepository.TAG, "${CredentialRepository.ANDROID_KEYSTORE_CIPHER_PROVIDER} unavailable, falling back to default provider resolution", e)
+            PasskeyLog.w(CredentialRepository.TAG, "${CredentialRepository.ANDROID_KEYSTORE_CIPHER_PROVIDER} unavailable, falling back to default provider resolution", e)
             Cipher.getInstance("AES/GCM/NoPadding")
         }
     }

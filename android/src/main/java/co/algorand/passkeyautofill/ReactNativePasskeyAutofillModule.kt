@@ -11,7 +11,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.util.Log
+import co.algorand.passkeyautofill.utils.PasskeyLog
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
 
@@ -45,6 +45,7 @@ class ReactNativePasskeyAutofillModule : Module() {
 
     OnCreate {
       instance = this@ReactNativePasskeyAutofillModule
+      ((appContext.reactContext ?: appContext.hostingRuntimeContext) as? Context)?.let { PasskeyLog.init(it) }
     }
 
     OnDestroy {
@@ -62,7 +63,7 @@ class ReactNativePasskeyAutofillModule : Module() {
       try {
         credentialRepository.saveMasterKey(context, secret)
       } catch (e: Exception) {
-        Log.e(CredentialRepository.TAG, "Failed to save master key", e)
+        PasskeyLog.e(CredentialRepository.TAG, "Failed to save master key", e)
         throw MasterKeyException(e.message ?: "Failed to save master key", e)
       }
     }
@@ -75,7 +76,7 @@ class ReactNativePasskeyAutofillModule : Module() {
       if (context != null) {
         credentialRepository.saveMainKeyId(context, id)
       } else {
-        Log.e(CredentialRepository.TAG, "Could not get context to save main key ID")
+        PasskeyLog.e(CredentialRepository.TAG, "Could not get context to save main key ID")
       }
     }
 
@@ -84,7 +85,7 @@ class ReactNativePasskeyAutofillModule : Module() {
       if (context != null) {
         credentialRepository.getMainKeyId(context)
       } else {
-        Log.e(CredentialRepository.TAG, "Could not get context to get main key ID")
+        PasskeyLog.e(CredentialRepository.TAG, "Could not get context to get main key ID")
         null
       }
     }
@@ -96,7 +97,7 @@ class ReactNativePasskeyAutofillModule : Module() {
       if (context != null) {
         credentialRepository.saveMainKeyId(context, id)
       } else {
-        Log.e(CredentialRepository.TAG, "Could not get context to save HD root key ID")
+        PasskeyLog.e(CredentialRepository.TAG, "Could not get context to save HD root key ID")
       }
     }
 
@@ -105,7 +106,7 @@ class ReactNativePasskeyAutofillModule : Module() {
       if (context != null) {
         credentialRepository.getMainKeyId(context)
       } else {
-        Log.e(CredentialRepository.TAG, "Could not get context to get HD root key ID")
+        PasskeyLog.e(CredentialRepository.TAG, "Could not get context to get HD root key ID")
         null
       }
     }
@@ -221,7 +222,7 @@ class ReactNativePasskeyAutofillModule : Module() {
         val cm = context.getSystemService(android.credentials.CredentialManager::class.java)
         cm != null && cm.isEnabledCredentialProviderService(component)
       } catch (e: Throwable) {
-        Log.d("ReactNativePasskeyAutofill", "CredentialManager.isEnabledCredentialProviderService failed: ${e.message}")
+        PasskeyLog.d("ReactNativePasskeyAutofill", "CredentialManager.isEnabledCredentialProviderService failed: ${e.message}")
         false
       }
     }
@@ -233,7 +234,7 @@ class ReactNativePasskeyAutofillModule : Module() {
       val value = try {
         Settings.Secure.getString(resolver, key)
       } catch (e: SecurityException) {
-        Log.d("ReactNativePasskeyAutofill", "Secure key $key not readable: ${e.message}")
+        PasskeyLog.d("ReactNativePasskeyAutofill", "Secure key $key not readable: ${e.message}")
         null
       } ?: continue
       if (value.isEmpty()) continue
@@ -288,7 +289,7 @@ class ReactNativePasskeyAutofillModule : Module() {
         context.startActivity(intent)
         return true
       } catch (e: Exception) {
-        Log.w("ReactNativePasskeyAutofill", "Failed to open ${intent.action}: ${e.message}")
+        PasskeyLog.w("ReactNativePasskeyAutofill", "Failed to open ${intent.action}: ${e.message}")
       }
     }
     return false

@@ -3,7 +3,7 @@ package co.algorand.passkeyautofill.auth
 import android.content.Context
 import android.content.pm.PackageManager
 import android.security.keystore.KeyProperties
-import android.util.Log
+import co.algorand.passkeyautofill.utils.PasskeyLog
 import androidx.biometric.BiometricManager.Authenticators
 
 /**
@@ -63,7 +63,7 @@ enum class BiometricRequirement {
             "weakOrCredential" -> WEAK_OR_CREDENTIAL
             else -> {
                 if (!trimmed.isNullOrEmpty()) {
-                    Log.w(TAG, "Unknown biometricRequirement value '$trimmed', using default STRONG_OR_CREDENTIAL")
+                    PasskeyLog.w(TAG, "Unknown biometricRequirement value '$trimmed', using default STRONG_OR_CREDENTIAL")
                 }
                 STRONG_OR_CREDENTIAL
             }
@@ -77,7 +77,7 @@ enum class BiometricRequirement {
                     .metaData
                     ?.getString(META_DATA_KEY)
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to read $META_DATA_KEY meta-data, using default", e)
+                PasskeyLog.w(TAG, "Failed to read $META_DATA_KEY meta-data, using default", e)
                 null
             }
             return fromValue(value)

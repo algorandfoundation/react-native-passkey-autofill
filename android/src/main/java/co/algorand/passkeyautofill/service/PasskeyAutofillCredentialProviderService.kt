@@ -29,6 +29,7 @@ import androidx.biometric.BiometricPrompt
 import co.algorand.passkeyautofill.auth.BiometricRequirement
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
+import co.algorand.passkeyautofill.credentials.RelyingParty
 import co.algorand.passkeyautofill.utils.PasskeyUtils
 import android.util.Base64 as AndroidBase64
 import com.tencent.mmkv.MMKV
@@ -192,6 +193,17 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         val action = credentialRepository.getGetPasskeyAction(this) ?: DEFAULT_GET_PASSKEY_ACTION
         val allEntries = mutableListOf<PublicKeyCredentialEntry>()
 
+        // A native caller that names no rpId is scoped to its own signing
+        // identity, the same origin a credential it created was stored under.
+        val callingOrigin = request.callingAppInfo?.let { info ->
+            try {
+                credentialRepository.getOrigin(info)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not derive the calling app's origin", e)
+                null
+            }
+        }
+
         for (option in request.beginGetCredentialOptions) {
             if (option !is BeginGetPublicKeyCredentialOption) continue
 
@@ -208,6 +220,17 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                 Log.e(TAG, "Error parsing requestJson", e)
             }
 
+            // Discoverable credentials are strictly RP-scoped: only credentials
+            // created for the requesting relying party are ever offered, whether
+            // or not allowCredentials narrows them further. No relying party, no
+            // entries.
+            val requestedRpId = RelyingParty.effectiveRpId(requestJsonStr, callingOrigin)
+            if (requestedRpId == null) {
+                Log.w(TAG, "Get request names no relying party; offering no entries")
+                continue
+            }
+            val scopedCredentials = credentials.filter { RelyingParty.matches(it.origin, requestedRpId) }
+
             val allowedIds = if (allowCredentials != null && allowCredentials.length() > 0) {
                 val ids = mutableSetOf<String>()
                 for (i in 0 until allowCredentials.length()) {
@@ -218,7 +241,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                 null
             }
 
-            for (credential in credentials) {
+            for (credential in scopedCredentials) {
                 if (allowedIds != null) {
                     val isAllowed = allowedIds.any { allowedId ->
                         allowedId == credential.credentialId ||

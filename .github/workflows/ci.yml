@@ -21,6 +21,17 @@ jobs:
           java-version: "17"
       - run: pnpm install --frozen-lockfile
       - run: cd example && npx expo prebuild
+      # The AutoFill extension links native crypto from a Swift package. Refuse a
+      # generated project that tracks a branch or version range: only a commit
+      # revision makes the wallet build reproducible from its source commit.
+      - name: Verify Swift packages are pinned to a revision
+        run: |
+          pbxproj=$(ls example/ios/*.xcodeproj/project.pbxproj)
+          if grep -E 'kind = (branch|upToNextMajorVersion|upToNextMinorVersion|versionRange|exactVersion)' "$pbxproj"; then
+            echo "Swift package requirement is not a commit revision" >&2
+            exit 1
+          fi
+          grep -q 'kind = revision' "$pbxproj"
       - run: pnpm run lint
       - run: pnpm run fmt:check
       - run: pnpm run build

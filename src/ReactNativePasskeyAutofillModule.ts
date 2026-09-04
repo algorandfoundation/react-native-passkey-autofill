@@ -29,7 +29,18 @@ declare class ReactNativePasskeyAutofillModule extends NativeModule<ReactNativeP
   /** @deprecated use {@link getMainKeyId} */
   getHdRootKeyId(): Promise<string | null>;
   configureIntentActions(getPasskeyAction: string, createPasskeyAction: string): Promise<void>;
+  /**
+   * Removes every passkey this module owns. The native store is shared with the
+   * wallet's keystore, so only records that read back as this module's passkey
+   * types are removed; the wallet's seeds, roots and account keys are untouched.
+   */
   clearCredentials(): Promise<void>;
+  /**
+   * Removes the passkey stored under `credentialId`. Like {@link clearCredentials}
+   * this only ever removes a record that reads back as one of this module's
+   * passkey types: an id that addresses a wallet-owned keystore record removes
+   * nothing.
+   */
   deleteCredential(credentialId: string): Promise<void>;
   /**
    * iOS: returns the identities currently published to the AutoFill

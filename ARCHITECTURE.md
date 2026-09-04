@@ -62,7 +62,7 @@ The following methods are exposed to the JavaScript layer:
 - `setMainKeyId(id: string)`: Sets the ID for the P-256 main key (the parent secret for passkey derivation). The legacy `setHdRootKeyId` remains as a deprecated alias.
 - `getMainKeyId()`: Retrieves the current P-256 main key ID.
 - `configureIntentActions(getPasskeyAction: string, createPasskeyAction: string)`: Configures the intent actions used for Passkey flows.
-- `clearCredentials()`: Clears all stored credentials.
+- `clearCredentials()`: Removes every passkey this module owns. On Android the passkeys MMKV instance is the wallet's own keystore namespace, so this is a record-by-record sweep of positively identified passkey records, never a `clearAll()`; `deleteCredential(id)` applies the same ownership check before removing anything.
 - `isProviderActive()`: Returns `true` if this app is the user-selected system credential/autofill provider. Uses Android's `Settings.Secure("credential_service"[_primary])` (API 34+) and iOS's `ASCredentialIdentityStore.getState`. Useful both for gating passkey UI at runtime and for E2E tests, which need to confirm that an OS passkey prompt is served by _this_ provider rather than any other installed one.
 - `openProviderSettings()`: Deep-links the user to the OS credential/autofill provider settings so they can enable this app as the active provider. Resolves to `true` if a settings screen could be launched.
 

@@ -16,8 +16,8 @@ import org.json.JSONObject
  *
  * `credRandom` is a per-credential 32-byte secret. We derive it
  * deterministically (HKDF-SHA256) from the wallet HD root secret, the
- * relying-party identifier, and the user handle — the same inputs that
- * produce the deterministic signing key. This avoids a storage migration
+ * relying-party identifier, and the credential's derivation identity — the
+ * same inputs that produce the deterministic signing key. This avoids a storage migration
  * and ensures restoring the wallet seed reproduces the same PRF outputs
  * on another device.
  */
@@ -27,16 +27,21 @@ object Prf {
 
   /**
    * Derive a 32-byte per-credential PRF secret from the HD root secret.
-   * Deterministic over `(hdRootSecret, rpId, userHandle)`.
+   * Deterministic over `(hdRootSecret, lower(rpId), identity)`.
+   *
+   * @param identity the credential's derivation identity from
+   *   `PasskeyDerivation.identity`, used VERBATIM. A legacy identity arrives
+   *   already lowercased, so legacy outputs are unchanged; a canonical one is
+   *   the relying party's opaque `user.id`, whose case must survive.
    */
   fun credRandom(
     hdRootSecret: ByteArray,
     relyingPartyIdentifier: String,
-    userHandle: String,
+    identity: String,
   ): ByteArray {
     val salt = relyingPartyIdentifier.lowercase().toByteArray(Charsets.UTF_8) +
       byteArrayOf(0x00) +
-      userHandle.lowercase().toByteArray(Charsets.UTF_8)
+      identity.toByteArray(Charsets.UTF_8)
     return hkdfSha256(
       ikm = hdRootSecret,
       salt = salt,

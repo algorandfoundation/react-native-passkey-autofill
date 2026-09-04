@@ -283,6 +283,56 @@ object KeystoreRecords {
     }
 
     /**
+     * Decides which keys of the SHARED passkeys MMKV instance a "delete
+     * credential" call may remove for the credential known under any of
+     * `candidateIds` (the same id in its several historical encodings).
+     *
+     * The instance also holds the wallet's seeds, roots and account keys under
+     * ids a caller could pass by mistake, so a candidate is only removed once
+     * its record has been read and positively identified as one of THIS
+     * MODULE's passkey types ([isPasskeyRecordType]) — under either layout. A
+     * sealed legacy record that cannot be opened (no `masterKey`, or the wrong
+     * one) is left alone rather than guessed at, exactly like [keysToRemoveForClear].
+     *
+     * @param candidateIds every encoding the credential id may be stored under.
+     * @param masterKey needed to open sealed legacy flat records.
+     * @param payloadFor reads the raw stored payload for a key, `null` if absent.
+     */
+    fun keysToRemoveForDelete(
+        candidateIds: Set<String>,
+        masterKey: ByteArray?,
+        payloadFor: (String) -> String?,
+    ): List<String> {
+        val removable = mutableListOf<String>()
+        for (id in candidateIds) {
+            // A caller cannot address a `k/` or `m/` entry directly.
+            if (id.startsWith(METADATA_PREFIX) || id.startsWith(MATERIAL_PREFIX)) continue
+
+            payloadFor(metadataKey(id))?.let { metadata ->
+                val type = try {
+                    JSONObject(metadata).optString("type", "")
+                } catch (e: Exception) {
+                    ""
+                }
+                if (isPasskeyRecordType(type)) {
+                    removable.add(metadataKey(id))
+                    removable.add(materialKey(id))
+                }
+            }
+
+            payloadFor(id)?.let { legacy ->
+                val type = try {
+                    decodeLegacyRecord(legacy, masterKey).optString("type", "")
+                } catch (e: Exception) {
+                    ""
+                }
+                if (isPasskeyRecordType(type)) removable.add(id)
+            }
+        }
+        return removable
+    }
+
+    /**
      * Decodes a LEGACY flat record's payload (bare-id key, pre-`k/`+`m/`
      * split) into the `KeyData` JSON it seals.
      *

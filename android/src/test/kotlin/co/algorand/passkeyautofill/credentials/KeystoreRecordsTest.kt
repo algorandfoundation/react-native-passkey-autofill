@@ -316,6 +316,72 @@ class KeystoreRecordsTest {
         assertTrue(removable.isEmpty())
     }
 
+    @Test
+    fun deletingRemovesOnlyThisModulesRecordUnderTheGivenId() {
+        val masterKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val store = mutableMapOf(
+            // Ours, split layout.
+            KeystoreRecords.metadataKey("our-split") to
+                JSONObject().put("id", "our-split").put("type", "hd-derived-p256").toString(),
+            KeystoreRecords.materialKey("our-split") to KeystoreRecords.sealMaterial(masterKey, byteArrayOf(1)),
+            // Ours, legacy flat layout.
+            "our-legacy" to legacyFlatRecordPayload(
+                masterKey,
+                JSONObject().put("id", "our-legacy").put("type", "xhd-derived-p256"),
+            ),
+            // The wallet's seed under an id a caller could pass by mistake.
+            "wallet-seed" to legacyFlatRecordPayload(
+                masterKey,
+                JSONObject().put("id", "wallet-seed").put("type", "seed"),
+            ),
+            // The wallet's root, split layout.
+            KeystoreRecords.metadataKey("wallet-root") to
+                JSONObject().put("id", "wallet-root").put("type", "hd-root-key").toString(),
+            KeystoreRecords.materialKey("wallet-root") to KeystoreRecords.sealMaterial(masterKey, ByteArray(96)),
+        )
+
+        assertEquals(
+            setOf(KeystoreRecords.metadataKey("our-split"), KeystoreRecords.materialKey("our-split")),
+            KeystoreRecords.keysToRemoveForDelete(setOf("our-split"), masterKey) { store[it] }.toSet(),
+        )
+        assertEquals(
+            listOf("our-legacy"),
+            KeystoreRecords.keysToRemoveForDelete(setOf("our-legacy"), masterKey) { store[it] },
+        )
+
+        // Wallet-owned records are never removable, whatever id is passed.
+        assertTrue(KeystoreRecords.keysToRemoveForDelete(setOf("wallet-seed"), masterKey) { store[it] }.isEmpty())
+        assertTrue(KeystoreRecords.keysToRemoveForDelete(setOf("wallet-root"), masterKey) { store[it] }.isEmpty())
+        // Nor can a caller reach a `k/` or `m/` entry by naming it directly.
+        assertTrue(
+            KeystoreRecords.keysToRemoveForDelete(
+                setOf(KeystoreRecords.materialKey("wallet-root"), KeystoreRecords.metadataKey("our-split")),
+                masterKey,
+            ) { store[it] }.isEmpty(),
+        )
+        // An unknown id removes nothing.
+        assertTrue(KeystoreRecords.keysToRemoveForDelete(setOf("nope"), masterKey) { store[it] }.isEmpty())
+    }
+
+    @Test
+    fun deletingASealedLegacyRecordNeedsTheMasterKeyToProveOwnership() {
+        val masterKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val otherKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val store = mapOf(
+            "our-legacy" to legacyFlatRecordPayload(
+                masterKey,
+                JSONObject().put("id", "our-legacy").put("type", "hd-derived-p256"),
+            ),
+        )
+
+        assertTrue(KeystoreRecords.keysToRemoveForDelete(setOf("our-legacy"), null) { store[it] }.isEmpty())
+        assertTrue(KeystoreRecords.keysToRemoveForDelete(setOf("our-legacy"), otherKey) { store[it] }.isEmpty())
+        assertEquals(
+            listOf("our-legacy"),
+            KeystoreRecords.keysToRemoveForDelete(setOf("our-legacy"), masterKey) { store[it] },
+        )
+    }
+
     // --- Root selection -----------------------------------------------------
 
     @Test

@@ -147,7 +147,21 @@ interface CredentialRepository {
     fun configureIntentActions(context: Context, getPasskeyAction: String, createPasskeyAction: String)
     fun getCreatePasskeyAction(context: Context): String?
     fun getGetPasskeyAction(context: Context): String?
+    /**
+     * Removes every credential THIS MODULE owns. The passkeys MMKV instance is
+     * shared with the wallet's key store, so this is a record-by-record sweep
+     * of positively identified passkey records ([KeystoreRecords.keysToRemoveForClear]),
+     * never a `clearAll()` of the shared namespace.
+     */
     fun clearCredentials(context: Context)
+
+    /**
+     * Removes the credential stored under `credentialId` (in any of its
+     * historical encodings) — but only if the record reads back as one of this
+     * module's passkey types ([KeystoreRecords.keysToRemoveForDelete]). An id
+     * that addresses a wallet-owned record, or a sealed record that cannot be
+     * opened to prove ownership, removes nothing.
+     */
     fun deleteCredential(context: Context, credentialId: String)
     fun recordCredentialUsage(context: Context, credentialId: ByteArray)
 
@@ -895,10 +909,20 @@ class Repository() : CredentialRepository {
 
     override fun deleteCredential(context: Context, credentialId: String) {
         try {
+            // The passkeys instance is the WALLET's key store. Whatever id the
+            // caller hands us, only a record that reads back as one of this
+            // module's own passkeys is removed — never a seed, root or account
+            // key that happens to live under that id.
             val mmkvPasskeys = getPasskeysMMKV(context)
-            for (candidateId in credentialIdCandidates(credentialId)) {
-                mmkvPasskeys.removeValueForKey(candidateId)
+            val removable = KeystoreRecords.keysToRemoveForDelete(
+                candidateIds = credentialIdCandidates(credentialId),
+                masterKey = getMasterKey(context),
+            ) { mmkvPasskeys.decodeString(it) }
+            if (removable.isEmpty()) {
+                Log.w(CredentialRepository.TAG, "deleteCredential: no passkey record owned by this module matches; nothing removed")
+                return
             }
+            removable.forEach { mmkvPasskeys.removeValueForKey(it) }
         } catch (e: Exception) {
             Log.e(CredentialRepository.TAG, "Error deleting credential", e)
         }

@@ -142,6 +142,39 @@ class CredentialRepositoryTest {
         assertEquals("https://legacy.example", repository.getCredential(context, rawId)?.origin)
     }
 
+    // --- Metadata-only enumeration (F-2026-19098) -----------------------------
+
+    @Test
+    fun enumerationAndMetadataLookupsNeverMaterialiseThePrivateKey() {
+        repository.saveMasterKey(context, ByteArray(32) { it.toByte() })
+        val rawId = "metadata-only".toByteArray()
+        val privateKey = android.util.Base64.encodeToString(ByteArray(32) { (it + 1).toByte() }, android.util.Base64.NO_WRAP)
+        repository.saveCredential(
+            context,
+            Credential(
+                credentialId = base64Id(rawId),
+                origin = "https://example.com",
+                userHandle = "user-handle",
+                userId = "dXNlci1pZA",
+                publicKey = "YTM0",
+                privateKey = privateKey,
+                count = 0
+            ),
+        )
+
+        val listed = repository.getAllCredentials(context).single { it.credentialId == base64Id(rawId) }
+        assertEquals("", listed.privateKey)
+        assertEquals("https://example.com", listed.origin)
+        assertEquals("dXNlci1pZA", listed.userId)
+
+        val metadata = repository.getCredentialMetadata(context, rawId)!!
+        assertEquals("", metadata.privateKey)
+        assertEquals(listed, metadata)
+
+        // Only the post-selection read carries the material.
+        assertEquals(privateKey, repository.getCredential(context, rawId)!!.privateKey)
+    }
+
     @Test
     fun testSaveAndGetCredential() {
         val rawId = "test-credential-id".toByteArray()

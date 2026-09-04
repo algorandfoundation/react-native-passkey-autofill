@@ -81,6 +81,10 @@ All Android logging goes through `utils/PasskeyLog.kt`. Debug and info lines are
 The `UV` bit in `authenticatorData` is only set when a user-verification ceremony ran for that operation (`auth/UserVerification.kt`). Both activities track whether the system's Credential Manager prompt reported success and whether a `BiometricPrompt` they showed succeeded, and derive the flag from those two facts when the response is built. A request with `userVerification: "required"` runs a manual prompt whenever the system did not verify, and fails if no ceremony completes; `preferred` and `discouraged` may proceed without one, with `UV` clear. `UP` stays set, since choosing the entry in the system chooser is the presence gesture.
 
 
+### Derivation identity
+
+Everything deterministic about a passkey (its P-256 key and its PRF secret) is keyed on `origin` and an identity string. On Android that identity is chosen by `credentials/PasskeyDerivation.kt` and stamped on the record as `metadata.derivationVersion`: new credentials derive from the relying party's opaque `user.id` (normalised to unpadded base64url, case preserved), never from `user.name`, which is a display attribute that is neither stable nor unique and must not be case-folded. Records without a version read back as the legacy label derivation so existing credentials keep re-deriving the same key. The identity is passed to the key and PRF derivations verbatim; nothing downstream lowercases it.
+
 ## End-to-End Tests
 
 The `e2e/` workspace drives the `example/` app with Appium 2 + WebdriverIO, executed through Jest. The Android job uses the UiAutomator2 driver; the iOS job uses XCUITest. The happy-path spec mirrors the example and exercises passkey registration and assertion against `https://debug.liquidauth.com`. See [`e2e/README.md`](./e2e/README.md) for local usage and the [`E2E` workflow](./.github/workflows/e2e.yml) for CI.

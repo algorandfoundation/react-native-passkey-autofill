@@ -28,6 +28,7 @@ import co.algorand.passkeyautofill.auth.UserVerification
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.credentials.MasterKeyUnavailableException
+import co.algorand.passkeyautofill.credentials.PasskeyDerivation
 import co.algorand.passkeyautofill.utils.PasskeyUtils
 import java.security.KeyPair
 import android.util.Base64 as AndroidBase64
@@ -351,10 +352,18 @@ class CreatePasskeyActivity : AppCompatActivity() {
             }
 
             PasskeyLog.d(TAG, "Creating deterministic key pair")
+            // The identity the key hangs off is the relying party's opaque
+            // user.id, not the display name: names are neither stable nor
+            // unique, so two accounts sharing one (or one account renamed or
+            // re-cased) would otherwise collapse onto the same key and
+            // credential id. The version is stamped on the record so every
+            // later assertion and PRF evaluation re-derives from the same input.
+            val derivationVersion = PasskeyDerivation.versionForNewCredential(userId)
+            val identity = PasskeyDerivation.identity(derivationVersion, userId, userHandle)
             // No requested scheme: a new credential takes the preferred parent
             // (the wallet's deterministic-P256 main key), and records which one
             // it got so every later assertion re-derives the same key.
-            val derived = credentialRepository.createDomainKeyPair(this@CreatePasskeyActivity, origin, userHandle)
+            val derived = credentialRepository.createDomainKeyPair(this@CreatePasskeyActivity, origin, identity)
             val keyPair: KeyPair = derived.keyPair
             PasskeyLog.d(TAG, "Derived from parent ${derived.parentKeyId} (${derived.derivationScheme})")
             PasskeyLog.d(TAG, "Generating credential ID")
@@ -370,7 +379,8 @@ class CreatePasskeyActivity : AppCompatActivity() {
                 privateKey = AndroidBase64.encodeToString(keyPair.private.encoded, AndroidBase64.NO_WRAP),
                 count = 0,
                 parentKeyId = derived.parentKeyId,
-                derivationScheme = derived.derivationScheme
+                derivationScheme = derived.derivationScheme,
+                derivationVersion = derivationVersion,
             )
             
             PasskeyLog.d(TAG, "Saving credential to repository")

@@ -124,9 +124,6 @@ interface CredentialRepository {
      * Keystore/Keychain failure, or a key that cannot round-trip a seal
      * throws instead of being logged and swallowed, so the caller (and the JS
      * side, as a rejected promise) knows the key is NOT in place.
-     *
-     * On success any of this module's own legacy records that an earlier build
-     * wrote unsealed are re-sealed under the new key.
      */
     fun saveMasterKey(context: Context, secret: ByteArray)
 
@@ -723,43 +720,6 @@ class Repository() : CredentialRepository {
         val readBack = decryptFromKeychain(context)
         check(readBack != null && readBack.contentEquals(secret)) {
             "Master key did not read back from the Keychain after saving"
-        }
-
-        resealUnsealedRecords(context, secret)
-    }
-
-    /**
-     * Re-seals any of this module's own legacy flat records that an earlier
-     * build wrote without the AES-GCM envelope (see
-     * [KeystoreRecords.unsealedPasskeyRecordKeys]). It runs here, when the master
-     * key arrives, because that is the point at which the wallet has authenticated
-     * its user and unlocked. A record that cannot be re-sealed is left in place
-     * and logged rather than dropped: the credential id is what the relying
-     * party knows, and deleting it would orphan the account.
-     */
-    private fun resealUnsealedRecords(context: Context, masterKey: ByteArray) {
-        try {
-            val mmkv = getPasskeysMMKV(context)
-            val keys = KeystoreRecords.unsealedPasskeyRecordKeys(mmkv.allKeys() ?: emptyArray()) {
-                mmkv.decodeString(it)
-            }
-            if (keys.isEmpty()) return
-            Log.w(CredentialRepository.TAG, "Re-sealing ${keys.size} passkey record(s) stored without encryption")
-            for (key in keys) {
-                val payload = mmkv.decodeString(key) ?: continue
-                // The envelope's plaintext is base64url(JSON); a record stored as
-                // bare JSON is normalised to that shape first.
-                val plaintext = if (payload.startsWith("{")) {
-                    AndroidBase64.encodeToString(payload.toByteArray(Charsets.UTF_8), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
-                } else {
-                    payload
-                }
-                if (!mmkv.encode(key, KeystoreRecords.sealEnvelope(masterKey, plaintext))) {
-                    Log.e(CredentialRepository.TAG, "Failed to re-seal passkey record $key")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to re-seal unsealed passkey records", e)
         }
     }
 

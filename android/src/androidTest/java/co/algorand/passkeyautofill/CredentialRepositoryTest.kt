@@ -8,7 +8,6 @@ import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.KeystoreRecords
 import co.algorand.passkeyautofill.credentials.MasterKeyUnavailableException
 import com.tencent.mmkv.MMKV
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Before
@@ -108,38 +107,15 @@ class CredentialRepositoryTest {
 
         val stored = passkeysMMKV().decodeString("sealed-credential")
         assertNotNull(stored)
-        assertTrue(KeystoreRecords.isSealedEnvelope(stored!!))
+        // A sealed envelope: iv + content, and the plaintext (which carries the
+        // private key) is not recoverable from the stored string.
+        val envelope = JSONObject(stored!!)
+        assertTrue(envelope.has("iv") && envelope.has("content"))
         assertFalse(stored.contains("privateKey"))
-    }
-
-    @Test
-    fun saveMasterKeyResealsRecordsAnOlderBuildLeftUnsealed() {
-        // Plant exactly what the pre-fix fallback wrote: bare base64url(JSON)
-        // carrying the private key, keyed by the (base64) credential id.
-        val rawId = "left-unsealed".toByteArray()
-        val id = base64Id(rawId)
-        val keyData = JSONObject()
-            .put("id", id)
-            .put("type", "hd-derived-p256")
-            .put("privateKey", JSONArray(listOf(1, 2, 3)))
-            .put("publicKey", JSONArray(listOf(4, 5, 6)))
-            .put("metadata", JSONObject().put("origin", "https://legacy.example").put("userHandle", "u").put("userId", "id"))
-        val unsealed = android.util.Base64.encodeToString(
-            keyData.toString().toByteArray(Charsets.UTF_8),
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP,
+        assertEquals(
+            "sealed-credential",
+            KeystoreRecords.decodeLegacyRecord(stored, ByteArray(32) { it.toByte() }).getString("id"),
         )
-        passkeysMMKV().encode(id, unsealed)
-
-        val masterKey = ByteArray(32) { (it * 3).toByte() }
-        repository.saveMasterKey(context, masterKey)
-
-        val stored = passkeysMMKV().decodeString(id)!!
-        assertTrue(KeystoreRecords.isSealedEnvelope(stored))
-        assertFalse(stored.contains("privateKey"))
-        // And the record is still readable through the normal path.
-        val reopened = KeystoreRecords.decodeLegacyRecord(stored, masterKey)
-        assertEquals(id, reopened.getString("id"))
-        assertEquals("https://legacy.example", repository.getCredential(context, rawId)?.origin)
     }
 
     @Test

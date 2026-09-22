@@ -1,3 +1,16 @@
+# [1.0.0-canary.27](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.26...v1.0.0-canary.27) (2026-09-22)
+
+### Bug Fixes
+
+- **android:** drop the legacy re-seal migration; the unsealed write path was unreachable ([12e16f4](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/12e16f4c9a1ac3e6c583e3a1026d9799a10801e3)), closes [#24](https://github.com/algorandfoundation/react-native-passkey-autofill/issues/24)
+- **android:** fail closed when the passkey master key is unavailable ([56dbb8b](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/56dbb8ba78b9b517b1f2fa8db8e75cdf527a0909))
+- **android:** offer and sign only credentials scoped to the requesting relying party ([ce715f5](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/ce715f5c680279478baea3b3ac87e4d663794244))
+- **android:** only delete records this module owns from the shared keystore ([2fe3d08](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/2fe3d088dafaaf6c34d755233dc77ba2fd6b9188))
+- **android:** route logging through PasskeyLog and stop logging ceremony data ([15ee108](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/15ee108e4c9171548f27ab1b8a4a9fc98a85812c))
+- **android:** set the WebAuthn UV flag only when a verification ceremony ran ([a2321b5](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/a2321b501bb3211e3e4c617eb806244fcc0eb51a))
+- enumerate passkeys as metadata only; open one private key after selection ([7b03f81](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/7b03f81c171ed686e8410f8e3fe3dbdab5b987cf))
+- **ios:** pin the deterministic-P256 Swift package to a commit revision ([a9e8c85](https://github.com/algorandfoundation/react-native-passkey-autofill/commit/a9e8c85653239d44acc053933f55da803175480f))
+
 # [1.0.0-canary.26](https://github.com/algorandfoundation/react-native-passkey-autofill/compare/v1.0.0-canary.25...v1.0.0-canary.26) (2026-08-17)
 
 ### Bug Fixes

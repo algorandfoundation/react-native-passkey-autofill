@@ -1,6 +1,6 @@
 {
   "name": "@algorandfoundation/react-native-passkey-autofill",
-  "version": "1.0.0-canary.26",
+  "version": "1.0.0-canary.27",
   "description": "Passkey AutoFill React Native",
   "keywords": [
     "@algorandfoundation/react-native-passkey-autofill",

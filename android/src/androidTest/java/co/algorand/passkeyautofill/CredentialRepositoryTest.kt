@@ -1,9 +1,14 @@
 package co.algorand.passkeyautofill
 
+import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import co.algorand.passkeyautofill.credentials.Credential
 import co.algorand.passkeyautofill.credentials.CredentialRepository
+import co.algorand.passkeyautofill.credentials.KeystoreRecords
+import co.algorand.passkeyautofill.credentials.MasterKeyUnavailableException
+import com.tencent.mmkv.MMKV
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -19,6 +24,131 @@ class CredentialRepositoryTest {
     fun setUp() {
         repository = CredentialRepository()
         repository.clearCredentials(context)
+        forgetMasterKey()
+    }
+
+    /** Removes the stored master key so the process is in its "wallet has not called setMasterKey" state. */
+    private fun forgetMasterKey() {
+        context.getSharedPreferences(CredentialRepository.KEYCHAIN_STORAGE_NAME, Context.MODE_PRIVATE)
+            .edit().clear().commit()
+    }
+
+    private fun passkeysMMKV(): MMKV {
+        MMKV.initialize(context)
+        return MMKV.mmkvWithID(CredentialRepository.PASSKEYS_MMKV_ID, MMKV.MULTI_PROCESS_MODE)
+    }
+
+    // --- Fail-closed master key (F-2026-18982) ------------------------------
+
+    /**
+     * `getCredential` takes the RAW credential id and base64-encodes it before
+     * the MMKV lookup, while `saveCredential` stores under the base64 id the
+     * create flow hands it. Tests therefore plant/save under [base64Id] and
+     * read back with the raw bytes, exactly like the activity does.
+     */
+    private fun base64Id(rawId: ByteArray): String =
+        android.util.Base64.encodeToString(rawId, android.util.Base64.NO_WRAP)
+
+    @Test
+    fun saveCredentialWithoutAMasterKeyThrowsAndWritesNothing() {
+        assertFalse(repository.isMasterKeyAvailable(context))
+        val rawId = "no-master-key".toByteArray()
+        val credential = Credential(
+            credentialId = base64Id(rawId),
+            origin = "https://example.com",
+            userHandle = "user-handle",
+            userId = "user-id",
+            publicKey = "YTM0",
+            privateKey = "c2VjcmV0", // "secret"
+            count = 0
+        )
+
+        try {
+            repository.saveCredential(context, credential)
+            fail("saveCredential must refuse to write without a master key")
+        } catch (e: MasterKeyUnavailableException) {
+            // expected
+        }
+
+        assertFalse(passkeysMMKV().containsKey(base64Id(rawId)))
+        assertNull(repository.getCredential(context, rawId))
+    }
+
+    @Test
+    fun saveMasterKeyRejectsAWrongLengthKeyAndKeepsTheOldOne() {
+        val good = ByteArray(KeystoreRecords.MASTER_KEY_LENGTH) { it.toByte() }
+        repository.saveMasterKey(context, good)
+        assertTrue(repository.isMasterKeyAvailable(context))
+
+        try {
+            repository.saveMasterKey(context, ByteArray(16) { 1 })
+            fail("a 16-byte master key must be rejected")
+        } catch (e: IllegalArgumentException) {
+            // expected
+        }
+
+        // The previous, valid key is untouched.
+        assertTrue(repository.isMasterKeyAvailable(context))
+    }
+
+    @Test
+    fun aSavedCredentialIsSealedInTheStore() {
+        repository.saveMasterKey(context, ByteArray(32) { it.toByte() })
+        val credential = Credential(
+            credentialId = "sealed-credential",
+            origin = "https://example.com",
+            userHandle = "user-handle",
+            userId = "user-id",
+            publicKey = "YTM0",
+            privateKey = "c2VjcmV0",
+            count = 0
+        )
+        repository.saveCredential(context, credential)
+
+        val stored = passkeysMMKV().decodeString("sealed-credential")
+        assertNotNull(stored)
+        // A sealed envelope: iv + content, and the plaintext (which carries the
+        // private key) is not recoverable from the stored string.
+        val envelope = JSONObject(stored!!)
+        assertTrue(envelope.has("iv") && envelope.has("content"))
+        assertFalse(stored.contains("privateKey"))
+        assertEquals(
+            "sealed-credential",
+            KeystoreRecords.decodeLegacyRecord(stored, ByteArray(32) { it.toByte() }).getString("id"),
+        )
+    }
+
+    // --- Metadata-only enumeration (F-2026-19098) -----------------------------
+
+    @Test
+    fun enumerationAndMetadataLookupsNeverMaterialiseThePrivateKey() {
+        repository.saveMasterKey(context, ByteArray(32) { it.toByte() })
+        val rawId = "metadata-only".toByteArray()
+        val privateKey = android.util.Base64.encodeToString(ByteArray(32) { (it + 1).toByte() }, android.util.Base64.NO_WRAP)
+        repository.saveCredential(
+            context,
+            Credential(
+                credentialId = base64Id(rawId),
+                origin = "https://example.com",
+                userHandle = "user-handle",
+                userId = "dXNlci1pZA",
+                publicKey = "YTM0",
+                privateKey = privateKey,
+                count = 0
+            ),
+        )
+
+        val listed = repository.getAllCredentials(context).single { it.credentialId == base64Id(rawId) }
+        assertEquals("", listed.privateKey)
+        assertEquals("https://example.com", listed.origin)
+        assertEquals("dXNlci1pZA", listed.userId)
+
+        val metadata = repository.getCredentialMetadata(context, rawId)!!
+        assertEquals("", metadata.privateKey)
+        assertEquals(listed, metadata)
+
+        // Only the post-selection read carries the material.
+        assertEquals(privateKey, repository.getCredential(context, rawId)!!.privateKey)
     }
 
     @Test

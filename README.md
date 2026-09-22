@@ -98,6 +98,9 @@ For iOS integration, make sure that:
 - The app has a `webcredentials:<domain>` associated domain, and that domain serves a valid `apple-app-site-association` file for the app identifier.
 - The deployment target is iOS 17 or newer for passkey credential provider support.
 - The generated extension target can link `AuthenticationServices.framework`, `CryptoKit.framework`, `MMKVCore`, and the deterministic P-256 Swift package.
+
+The deterministic P-256 Swift package is pinned to an exact upstream commit, not a branch, because it derives passkey keys from the wallet's root material and produces the signatures; a branch head can change between two prebuilds of the same wallet commit. To move the pin, set `deterministicP256PackageRevision` in the plugin props to a full 40-character commit SHA you have reviewed. The former `deterministicP256PackageBranch` prop is rejected. CI checks the generated Xcode project for any Swift package requirement that is not a commit revision.
+
 - `NSFaceIDUsageDescription` is present when biometric authentication is used.
 
 At runtime, the app must provide the native side with the master key, identify the P-256 main key (the parent secret for passkey derivation) stored in MMKV, and keep the iOS identity store in sync:
@@ -118,7 +121,9 @@ Call `refreshCredentialIdentities()` after creating, importing, deleting, or res
 import ReactNativePasskeyAutofill from "@algorandfoundation/react-native-passkey-autofill";
 
 // 1. Set the master key for encryption (raw bytes — never a hex string, so
-//    the secret isn't materialized as a non-zeroable JS string)
+//    the secret isn't materialized as a non-zeroable JS string). The promise
+//    REJECTS if the key cannot be stored and verified; until it resolves no
+//    passkey can be created, so surface the failure rather than continuing.
 await ReactNativePasskeyAutofill.setMasterKey(masterKeyBytes);
 
 // 2. Set the P-256 main key ID (parent secret for passkey derivation).

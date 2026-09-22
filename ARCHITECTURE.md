@@ -43,7 +43,7 @@ Introduced in Android 14 (API level 34) and backported to Android 9 via the Jetp
 The "Chain of Trust" ensures that passkeys are only used by the legitimate owners of a domain or application. This is handled through several layers of validation:
 
 1.  **Digital Asset Links**: For a passkey to be used across a website and an Android app, the website must host a `/.well-known/assetlinks.json` file that explicitly authorizes the Android app (via its package name and certificate fingerprint). This establishes a cryptographically verified link between the web origin and the mobile application.
-2.  **Relying Party ID (rpId) Validation**: When the service receives a `BeginGetCredentialRequest` or `BeginCreateCredentialRequest`, it includes information about the `rpId` (e.g., `example.com`). The system and the provider must ensure that the requesting app is authorized to use credentials for that `rpId`.
+2.  **Relying Party ID (rpId) Validation**: When the service receives a `BeginGetCredentialRequest` or `BeginCreateCredentialRequest`, it includes information about the `rpId` (e.g., `example.com`). The system verifies that the requesting app is authorized for that `rpId`; the provider then enforces credential scope itself (`credentials/RelyingParty.kt`): a get request is resolved to an effective RP ID (the request's `rpId`, else the calling app's `android:apk-key-hash:` origin), only credentials stored for that RP are offered as entries, and `GetPasskeyActivity` re-checks the selected credential against the request before any private material is loaded. A request that names no relying party gets no entries. Related Origin Requests are not supported.
 3.  **App Signature Verification**: The Android system verifies the signature of the app requesting the credential. It will only offer credentials to apps that can prove their identity through the Digital Asset Link chain.
 4.  **User Consent**: The `CredentialProviderService` does not directly return the credential. Instead, it returns a list of "Entries" (like `PublicKeyCredentialEntry`). When a user selects an entry, a `PendingIntent` is triggered, which typically launches an activity (like `GetPasskeyActivity`) to perform user verification (e.g., biometric check) before the actual passkey is released to the requesting app.
 
@@ -62,13 +62,23 @@ The following methods are exposed to the JavaScript layer:
 - `setMainKeyId(id: string)`: Sets the ID for the P-256 main key (the parent secret for passkey derivation). The legacy `setHdRootKeyId` remains as a deprecated alias.
 - `getMainKeyId()`: Retrieves the current P-256 main key ID.
 - `configureIntentActions(getPasskeyAction: string, createPasskeyAction: string)`: Configures the intent actions used for Passkey flows.
-- `clearCredentials()`: Clears all stored credentials.
+- `clearCredentials()`: Removes every passkey this module owns. On Android the passkeys MMKV instance is the wallet's own keystore namespace, so this is a record-by-record sweep of positively identified passkey records, never a `clearAll()`; `deleteCredential(id)` applies the same ownership check before removing anything.
 - `isProviderActive()`: Returns `true` if this app is the user-selected system credential/autofill provider. Uses Android's `Settings.Secure("credential_service"[_primary])` (API 34+) and iOS's `ASCredentialIdentityStore.getState`. Useful both for gating passkey UI at runtime and for E2E tests, which need to confirm that an OS passkey prompt is served by _this_ provider rather than any other installed one.
 - `openProviderSettings()`: Deep-links the user to the OS credential/autofill provider settings so they can enable this app as the active provider. Resolves to `true` if a settings screen could be launched.
 
 ## Security Considerations
 
 As this module handles sensitive information (Passkeys), keys and secrets are handled securely in the native layers. The master key is stored in platform secure storage — never in plaintext: on Android it is AES/GCM-encrypted under the AndroidKeyStore, and on iOS it is held in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) within a shared keychain access group so the app and the AutoFill extension can both read it. It is deliberately not biometric-gated, because the extension must read it to enumerate credentials before the user authenticates; biometric verification is applied at the assertion step instead. The master key crosses the JS↔native bridge as raw bytes (`Uint8Array`), never as a hex string.
+
+Encryption is a precondition, not a best effort. On Android, `setMasterKey` rejects its promise (code `ERR_MASTER_KEY`) if the key is not 32 bytes, cannot be stored in the AndroidKeyStore-backed Keychain, does not read back, or fails a seal/open round trip; nothing is silently logged and swallowed. `saveCredential` refuses to write a record when no master key is available (it throws `MasterKeyUnavailableException` and the create flow returns a `CreateCredentialUnknownException` to the relying party), so a P-256 private key is never persisted without AES-256-GCM. The Credential Provider service only offers `CreateEntry` / credential entries once the master key both reads back and passes the round trip.
+
+### Logging
+
+All Android logging goes through `utils/PasskeyLog.kt`. Debug and info lines are emitted only when the host app is debuggable and are stripped from release builds; warnings and errors are always emitted but carry fixed messages and non-sensitive fields only. Request and response JSON, credential ids, user ids and handles, challenges, ciphers, signatures, PRF outputs and key material are never logged at any level. `LoggingPolicyTest` fails the unit test run if any other file in the module imports `android.util.Log`.
+
+### User verification and the UV flag
+
+The `UV` bit in `authenticatorData` is only set when a user-verification ceremony ran for that operation (`auth/UserVerification.kt`). Both activities track whether the system's Credential Manager prompt reported success and whether a `BiometricPrompt` they showed succeeded, and derive the flag from those two facts when the response is built. A request with `userVerification: "required"` runs a manual prompt whenever the system did not verify, and fails if no ceremony completes; `preferred` and `discouraged` may proceed without one, with `UV` clear. `UP` stays set, since choosing the entry in the system chooser is the presence gesture.
 
 ## End-to-End Tests
 

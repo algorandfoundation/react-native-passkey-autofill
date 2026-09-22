@@ -34,6 +34,10 @@ struct StoredPasskeyCredential: Codable {
   let relyingPartyIdentifier: String
   let userName: String
   let userHandle: String
+  /// Base64 private material, or `""` when the record was read without it.
+  /// Only ``PasskeyCredentialStore/signingCredential(id:)`` fills this, for the
+  /// one credential the user selected and was verified for; enumeration and
+  /// metadata lookups leave it empty.
   let privateKey: String
   let publicKey: String?
   let createdAt: Double
@@ -143,9 +147,15 @@ final class PasskeyCredentialStore {
     self.credentialKey = credentialKey
   }
 
+  /// Every credential this store knows about, METADATA ONLY: `privateKey` is
+  /// empty on each. Enumeration runs before the user has picked a credential or
+  /// verified anything (the AutoFill list, the identity store), so no private
+  /// scalar is copied into an immutable string for records the user may never
+  /// select. Load exactly one credential's key afterwards with
+  /// ``signingCredential(id:)``.
   func allCredentials() -> [StoredPasskeyCredential] {
     let keystoreCredentials = allKeystoreCredentials()
-    let legacyCredentials = allLegacyCredentials()
+    let legacyCredentials = allLegacyCredentials().map { $0.withoutPrivateKey() }
     var credentialsById: [String: StoredPasskeyCredential] = [:]
 
     for credential in legacyCredentials {
@@ -166,14 +176,34 @@ final class PasskeyCredentialStore {
     return credentials
   }
 
+  /// Candidates for a relying party, metadata only (see ``allCredentials()``).
   func credentials(relyingPartyIdentifier: String) -> [StoredPasskeyCredential] {
     allCredentials().filter { $0.relyingPartyIdentifier == relyingPartyIdentifier }
   }
 
+  /// The credential stored under `id`, METADATA ONLY. Reads just that record.
   func credential(id: Data) -> StoredPasskeyCredential? {
+    if let credential = keystoreCredential(id: id, includePrivateKey: false) {
+      return credential
+    }
+    return legacyCredential(id: id)?.withoutPrivateKey()
+  }
+
+  /// The credential stored under `id` WITH its private key. This is the only
+  /// read that materialises private material, so call it once, after the user
+  /// has been verified for the assertion, and let the result go out of scope
+  /// as soon as the signature is produced.
+  func signingCredential(id: Data) -> StoredPasskeyCredential? {
+    if let credential = keystoreCredential(id: id, includePrivateKey: true) {
+      return credential
+    }
+    return legacyCredential(id: id)
+  }
+
+  private func legacyCredential(id: Data) -> StoredPasskeyCredential? {
     let encodedId = id.base64EncodedString()
     let urlEncodedId = id.base64URLEncodedString()
-    return allCredentials().first { $0.credentialId == encodedId || $0.credentialId == urlEncodedId }
+    return allLegacyCredentials().first { $0.credentialId == encodedId || $0.credentialId == urlEncodedId }
   }
 
   func save(_ credential: StoredPasskeyCredential) throws {
@@ -222,39 +252,89 @@ final class PasskeyCredentialStore {
     let keys: [String] = PasskeyKeystoreMMKV.allKeys(forAppGroup: appGroup, error: nil)
     appendDiagnostic("keystore allKeys count: \(keys.count)")
     return keys.compactMap { key -> StoredPasskeyCredential? in
-      guard let payload = try? PasskeyKeystoreMMKV.string(forKey: key, appGroup: appGroup),
-            let keyData = try? decodeKeystorePayload(payload, masterKey: masterKey),
-            let id = keyData["id"] as? String,
-            let publicKey = dataArray(keyData["publicKey"]),
-            let privateKey = dataArray(keyData["privateKey"])
-      else {
+      guard let payload = try? PasskeyKeystoreMMKV.string(forKey: key, appGroup: appGroup) else {
         appendDiagnostic("skipping keystore key: \(key)")
         return nil
       }
+      // Enumeration: the material stays undecoded.
+      return keystoreCredential(payload: payload, key: key, masterKey: masterKey, includePrivateKey: false)
+    }
+  }
 
-      let metadata = keyData["metadata"] as? [String: Any]
-      let origin = metadata?["origin"] as? String ?? keyData["origin"] as? String ?? ""
-      let userHandle = metadata?["userHandle"] as? String ?? keyData["userHandle"] as? String ?? ""
-      let parentKeyId = metadata?["parentKeyId"] as? String ?? keyData["parentKeyId"] as? String
-      guard !origin.isEmpty, !userHandle.isEmpty else {
-        appendDiagnostic("skipping keystore credential missing metadata: \(id)")
+  /// Reads the single keystore record for `id` (in any of its encodings)
+  /// without scanning the store.
+  private func keystoreCredential(id: Data, includePrivateKey: Bool) -> StoredPasskeyCredential? {
+    guard let masterKey = masterKey(),
+          let appGroup = Bundle.main.object(forInfoDictionaryKey: Self.defaultSuiteNameKey) as? String
+    else { return nil }
+
+    for candidate in credentialIdCandidates(id.base64EncodedString()) {
+      guard let payload = try? PasskeyKeystoreMMKV.string(forKey: candidate, appGroup: appGroup) else { continue }
+      if let credential = keystoreCredential(
+        payload: payload, key: candidate, masterKey: masterKey, includePrivateKey: includePrivateKey
+      ) {
+        return credential
+      }
+    }
+    return nil
+  }
+
+  /// Decodes one keystore record into a ``StoredPasskeyCredential``.
+  ///
+  /// - Parameter includePrivateKey: whether to materialise the private key.
+  ///   `false` for enumeration and pre-signing lookups; `true` only for the one
+  ///   credential the user selected and was verified for. The record must
+  ///   carry material either way — that is what distinguishes a passkey record
+  ///   from the wallet's split-layout metadata — but with `false` it is only
+  ///   checked for presence, never decoded.
+  private func keystoreCredential(
+    payload: String,
+    key: String,
+    masterKey: Data,
+    includePrivateKey: Bool
+  ) -> StoredPasskeyCredential? {
+    guard let keyData = try? decodeKeystorePayload(payload, masterKey: masterKey),
+          let id = keyData["id"] as? String,
+          let publicKey = dataArray(keyData["publicKey"]),
+          keyData["privateKey"] != nil
+    else {
+      appendDiagnostic("skipping keystore key: \(key)")
+      return nil
+    }
+
+    let privateKey: String
+    if includePrivateKey {
+      guard let material = dataArray(keyData["privateKey"]) else {
+        appendDiagnostic("skipping keystore key with undecodable material: \(key)")
         return nil
       }
-      let rawUserName = metadata?["userName"] as? String ?? keyData["userName"] as? String ?? userHandle
-
-      return StoredPasskeyCredential(
-        credentialId: id,
-        relyingPartyIdentifier: origin.relyingPartyIdentifier,
-        userName: rawUserName.passkeyDisplayName,
-        userHandle: userHandle,
-        privateKey: privateKey.base64EncodedString(),
-        publicKey: publicKey.base64EncodedString(),
-        createdAt: metadata?["createdAt"] as? Double ?? Date().timeIntervalSince1970,
-        lastUsedAt: metadata?["lastUsedAt"] as? Double,
-        parentKeyId: parentKeyId,
-        derivationScheme: metadata?["scheme"] as? String
-      )
+      privateKey = material.base64EncodedString()
+    } else {
+      privateKey = ""
     }
+
+    let metadata = keyData["metadata"] as? [String: Any]
+    let origin = metadata?["origin"] as? String ?? keyData["origin"] as? String ?? ""
+    let userHandle = metadata?["userHandle"] as? String ?? keyData["userHandle"] as? String ?? ""
+    let parentKeyId = metadata?["parentKeyId"] as? String ?? keyData["parentKeyId"] as? String
+    guard !origin.isEmpty, !userHandle.isEmpty else {
+      appendDiagnostic("skipping keystore credential missing metadata: \(id)")
+      return nil
+    }
+    let rawUserName = metadata?["userName"] as? String ?? keyData["userName"] as? String ?? userHandle
+
+    return StoredPasskeyCredential(
+      credentialId: id,
+      relyingPartyIdentifier: origin.relyingPartyIdentifier,
+      userName: rawUserName.passkeyDisplayName,
+      userHandle: userHandle,
+      privateKey: privateKey,
+      publicKey: publicKey.base64EncodedString(),
+      createdAt: metadata?["createdAt"] as? Double ?? Date().timeIntervalSince1970,
+      lastUsedAt: metadata?["lastUsedAt"] as? Double,
+      parentKeyId: parentKeyId,
+      derivationScheme: metadata?["scheme"] as? String
+    )
   }
 
   #if PASSKEY_AUTOFILL_EXTENSION
@@ -813,6 +893,22 @@ final class PasskeyCredentialStore {
 extension StoredPasskeyCredential {
   var credentialIdData: Data {
     Data(base64URLEncoded: credentialId) ?? Data()
+  }
+
+  /// The same record with its private key stripped: what enumeration hands out.
+  func withoutPrivateKey() -> StoredPasskeyCredential {
+    StoredPasskeyCredential(
+      credentialId: credentialId,
+      relyingPartyIdentifier: relyingPartyIdentifier,
+      userName: userName,
+      userHandle: userHandle,
+      privateKey: "",
+      publicKey: publicKey,
+      createdAt: createdAt,
+      lastUsedAt: lastUsedAt,
+      parentKeyId: parentKeyId,
+      derivationScheme: derivationScheme
+    )
   }
 
   var userHandleData: Data {

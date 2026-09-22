@@ -6,6 +6,13 @@ data class Credential(
     val userHandle: String,
     val userId: String,
     val publicKey: String,
+    /**
+     * Base64 private material, or `""` when the credential was read without
+     * it. Only `CredentialRepository.getCredential` fills this, for the one
+     * credential the user selected; enumeration and metadata lookups leave it
+     * empty, and a split-layout record never carries material at all (its key
+     * is re-derived from the parent on demand).
+     */
     val privateKey: String,
     val count: Int,
     val biometricIv: String? = null,

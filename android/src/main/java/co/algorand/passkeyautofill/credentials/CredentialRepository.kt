@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Log
+import co.algorand.passkeyautofill.utils.PasskeyLog
 import androidx.annotation.RequiresApi
 import androidx.credentials.provider.CallingAppInfo
 import com.tencent.mmkv.MMKV
@@ -75,6 +75,15 @@ sealed class ParentSecretResult {
         }
 }
 
+/**
+ * Thrown when an operation that MUST encrypt has no master key to encrypt
+ * with. Creation aborts on it: a passkey private key is never written to the
+ * shared store in the clear (F-2026-18982).
+ */
+class MasterKeyUnavailableException(
+    message: String = "Passkey master key unavailable: the wallet has not shared it with this process (setMasterKey)",
+) : IllegalStateException(message)
+
 interface CredentialRepository {
     val keyStore: KeyStore
     fun saveCredential(context: Context, credential: Credential, biometricCipher: Cipher? = null)
@@ -97,12 +106,56 @@ interface CredentialRepository {
     ): DerivedDomainKeyPair
     fun getOrigin(info: CallingAppInfo): String
     fun appInfoToOrigin(info: CallingAppInfo): String
+
+    /**
+     * The credential stored under `credentialId` WITH its private material
+     * (`privateKey`), opening the biometric wrapper with `biometricCipher` when
+     * the record has one. This is the only read that materialises a private
+     * key, so it must run after the user has selected the credential and
+     * completed whatever verification the request demands — never during
+     * candidate enumeration. Prefer [getCredentialMetadata] for anything that
+     * does not sign.
+     */
     fun getCredential(context: Context, credentialId: ByteArray, biometricCipher: Cipher? = null): Credential?
+
+    /**
+     * The credential stored under `credentialId` WITHOUT private material:
+     * `privateKey` is always empty. Needs no cipher and cannot trip a
+     * user-authentication requirement, so it is the right lookup for the
+     * relying-party checks and response metadata that precede signing.
+     */
+    fun getCredentialMetadata(context: Context, credentialId: ByteArray): Credential?
+
+    /** First stored credential for `origin`, metadata only (see [getAllCredentials]). */
     fun getCredentialByOrigin(context: Context, origin: String): Credential?
+
+    /**
+     * Every credential this module owns, METADATA ONLY: `privateKey` is empty
+     * on each. Enumeration runs before the user has picked a credential or
+     * verified anything (the Credential Provider service builds the chooser
+     * from it), so no private scalar is copied into an immutable string for
+     * records the user may never select. A legacy flat record still has to be
+     * opened to read its metadata — that is the record format — but its
+     * material is not decoded. Load exactly one credential's key afterwards
+     * with [getCredential] / [getKeyPair].
+     */
     fun getAllCredentials(context: Context): List<Credential>
     fun getPublicKeyFromKeyPair(keyPair: KeyPair?): ByteArray
     fun sign(keyPair: KeyPair, payload: ByteArray): ByteArray
+    /**
+     * `true` only when the master key can be read back AND proves it can seal
+     * and open a payload. The Credential Provider service gates every
+     * `CreateEntry` / `PublicKeyCredentialEntry` on this, so a device whose key
+     * cannot encrypt is never offered a passkey to create.
+     */
     fun isMasterKeyAvailable(context: Context): Boolean
+
+    /**
+     * Stores the wallet's master key. Fails closed: a wrong-length key, a
+     * Keystore/Keychain failure, or a key that cannot round-trip a seal
+     * throws instead of being logged and swallowed, so the caller (and the JS
+     * side, as a rejected promise) knows the key is NOT in place.
+     */
     fun saveMasterKey(context: Context, secret: ByteArray)
 
     /**
@@ -122,7 +175,21 @@ interface CredentialRepository {
     fun configureIntentActions(context: Context, getPasskeyAction: String, createPasskeyAction: String)
     fun getCreatePasskeyAction(context: Context): String?
     fun getGetPasskeyAction(context: Context): String?
+    /**
+     * Removes every credential THIS MODULE owns. The passkeys MMKV instance is
+     * shared with the wallet's key store, so this is a record-by-record sweep
+     * of positively identified passkey records ([KeystoreRecords.keysToRemoveForClear]),
+     * never a `clearAll()` of the shared namespace.
+     */
     fun clearCredentials(context: Context)
+
+    /**
+     * Removes the credential stored under `credentialId` (in any of its
+     * historical encodings) — but only if the record reads back as one of this
+     * module's passkey types ([KeystoreRecords.keysToRemoveForDelete]). An id
+     * that addresses a wallet-owned record, or a sealed record that cannot be
+     * opened to prove ownership, removes nothing.
+     */
     fun deleteCredential(context: Context, credentialId: String)
     fun recordCredentialUsage(context: Context, credentialId: ByteArray)
 
@@ -203,7 +270,7 @@ class Repository() : CredentialRepository {
     }
 
     override fun saveCredential(context: Context, credential: Credential, biometricCipher: Cipher?) {
-        Log.d(CredentialRepository.TAG, "saveCredential started for ${credential.origin}, userHandle: ${credential.userHandle}")
+        PasskeyLog.d(CredentialRepository.TAG, "saveCredential started")
         val mmkv = getPasskeysMMKV(context)
         
         // 1. Create KeyData matching @algorandfoundation/keystore
@@ -217,14 +284,14 @@ class Repository() : CredentialRepository {
         
         val privateKeyBytes = AndroidBase64.decode(credential.privateKey, AndroidBase64.DEFAULT)
         if (biometricCipher != null) {
-            Log.d(CredentialRepository.TAG, "Using biometricCipher for encryption")
+            PasskeyLog.d(CredentialRepository.TAG, "Using biometricCipher for encryption")
             val encryptedBytes = biometricCipher.doFinal(privateKeyBytes)
             val encJson = JSONObject()
             encJson.put("iv", AndroidBase64.encodeToString(biometricCipher.iv, AndroidBase64.NO_WRAP))
             encJson.put("data", AndroidBase64.encodeToString(encryptedBytes, AndroidBase64.NO_WRAP))
             keyData.put("privateKeyEnc", encJson)
         } else {
-            Log.d(CredentialRepository.TAG, "No biometricCipher, saving privateKey in plain (base64 in JSON)")
+            PasskeyLog.d(CredentialRepository.TAG, "No biometricCipher, saving privateKey in plain (base64 in JSON)")
             keyData.put("privateKey", JSONArray(privateKeyBytes.map { it.toInt() and 0xFF }))
         }
 
@@ -248,13 +315,13 @@ class Repository() : CredentialRepository {
         val jsonString = keyData.toString()
         val base64urlJson = AndroidBase64.encodeToString(jsonString.toByteArray(Charsets.UTF_8), AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
 
-        // 3. Seal matching react-native-keystore's commit()
-        val masterKey = getMasterKey(context)
-        if (masterKey != null) {
-            mmkv.encode(credential.credentialId, KeystoreRecords.sealEnvelope(masterKey, base64urlJson))
-        } else {
-            Log.w(CredentialRepository.TAG, "Master key not available for encrypting credential, saving encoded only")
-            mmkv.encode(credential.credentialId, base64urlJson)
+        // 3. Seal matching react-native-keystore's commit(). There is deliberately
+        // no unsealed fallback: without the master key the record — which carries
+        // the P-256 private key — is not written at all and creation aborts.
+        val masterKey = getMasterKey(context) ?: throw MasterKeyUnavailableException()
+        val sealed = KeystoreRecords.sealEnvelope(masterKey, base64urlJson)
+        check(mmkv.encode(credential.credentialId, sealed)) {
+            "Failed to write sealed credential record for ${credential.origin}"
         }
     }
 
@@ -292,31 +359,64 @@ class Repository() : CredentialRepository {
                 if (!KeystoreRecords.isPasskeyRecordType(json.optString("type", ""))) {
                     continue
                 }
-                if (json.has("id") && (json.has("origin") || json.has("metadata"))) {
-                    val metadata = json.optJSONObject("metadata")
-                    val encJson = json.optJSONObject("privateKeyEnc")
-
-                    credentials.add(Credential(
-                        credentialId = json.getString("id"),
-                        origin = metadata?.optString("origin") ?: json.optString("origin", ""),
-                        userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
-                        userId = metadata?.optString("userId") ?: json.optString("userId", ""),
-                        publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
-                        privateKey = if (json.has("privateKey")) AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT) else "",
-                        count = metadata?.optInt("count") ?: json.optInt("count", 0),
-                        biometricIv = encJson?.optString("iv"),
-                        parentKeyId = metadata?.optString("parentKeyId").takeUnless { it.isNullOrEmpty() },
-                        derivationScheme = metadata?.optString("scheme").takeUnless { it.isNullOrEmpty() },
-                        derivationVersion = metadata?.optInt("derivationVersion", PasskeyDerivation.VERSION_LEGACY_LABEL)
-                            ?: PasskeyDerivation.VERSION_LEGACY_LABEL,
-                    ))
-                }
+                // Enumeration: metadata only, the material stays undecoded.
+                credentialFromLegacyRecord(json, biometricCipher = null, includeMaterial = false)
+                    ?.let { credentials.add(it) }
             } catch (e: Exception) {
                 // Not a JSON or not a credential or decryption failed, skip
                 continue
             }
         }
         return credentials
+    }
+
+    /**
+     * Builds a [Credential] from a decoded legacy flat record (`KeyData` JSON).
+     *
+     * @param includeMaterial whether to materialise the private key. `false`
+     *   for enumeration and pre-signing lookups; `true` only for the single
+     *   credential the user selected and verified for.
+     * @param biometricCipher opens a biometric-wrapped `privateKeyEnc` when
+     *   material is requested and the record carries one.
+     */
+    private fun credentialFromLegacyRecord(
+        json: JSONObject,
+        biometricCipher: Cipher?,
+        includeMaterial: Boolean,
+    ): Credential? {
+        if (!json.has("id") || !(json.has("origin") || json.has("metadata"))) return null
+        val metadata = json.optJSONObject("metadata")
+        val encJson = json.optJSONObject("privateKeyEnc")
+
+        val privateKey = when {
+            !includeMaterial -> ""
+            encJson != null && biometricCipher != null -> {
+                PasskeyLog.d(CredentialRepository.TAG, "Decrypting privateKey with biometricCipher")
+                val data = AndroidBase64.decode(encJson.getString("data"), AndroidBase64.DEFAULT)
+                AndroidBase64.encodeToString(biometricCipher.doFinal(data), AndroidBase64.DEFAULT)
+            }
+            json.has("privateKey") ->
+                AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT)
+            else -> {
+                PasskeyLog.w(CredentialRepository.TAG, "No privateKey found in JSON")
+                ""
+            }
+        }
+
+        return Credential(
+            credentialId = json.getString("id"),
+            origin = metadata?.optString("origin") ?: json.optString("origin", ""),
+            userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
+            userId = metadata?.optString("userId") ?: json.optString("userId", ""),
+            publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
+            privateKey = privateKey,
+            count = metadata?.optInt("count") ?: json.optInt("count", 0),
+            biometricIv = encJson?.optString("iv"),
+            parentKeyId = metadata?.optString("parentKeyId").takeUnless { it.isNullOrEmpty() },
+            derivationScheme = metadata?.optString("scheme").takeUnless { it.isNullOrEmpty() },
+            derivationVersion = metadata?.optInt("derivationVersion", PasskeyDerivation.VERSION_LEGACY_LABEL)
+                ?: PasskeyDerivation.VERSION_LEGACY_LABEL,
+        )
     }
 
     /**
@@ -359,9 +459,20 @@ class Repository() : CredentialRepository {
         return messageDigest.digest(publicKeyBytes)
     }
 
-    override fun getCredential(context: Context, credentialId: ByteArray, biometricCipher: Cipher?): Credential? {
+    override fun getCredential(context: Context, credentialId: ByteArray, biometricCipher: Cipher?): Credential? =
+        readCredential(context, credentialId, biometricCipher, includeMaterial = true)
+
+    override fun getCredentialMetadata(context: Context, credentialId: ByteArray): Credential? =
+        readCredential(context, credentialId, biometricCipher = null, includeMaterial = false)
+
+    private fun readCredential(
+        context: Context,
+        credentialId: ByteArray,
+        biometricCipher: Cipher?,
+        includeMaterial: Boolean,
+    ): Credential? {
         val id = AndroidBase64.encodeToString(credentialId, AndroidBase64.DEFAULT).trim()
-        Log.d(CredentialRepository.TAG, "getCredential started for id: $id")
+        PasskeyLog.d(CredentialRepository.TAG, "readCredential started (includeMaterial=$includeMaterial)")
         val mmkv = getPasskeysMMKV(context)
 
         // Split layout first: its metadata half is plaintext, so it reads without
@@ -372,50 +483,21 @@ class Repository() : CredentialRepository {
             try {
                 credentialFromMetadataRecord(JSONObject(plaintext))?.let { return it }
             } catch (e: Exception) {
-                Log.w(CredentialRepository.TAG, "Unreadable metadata record for $candidate", e)
+                PasskeyLog.w(CredentialRepository.TAG, "Unreadable metadata record for a credential id candidate", e)
             }
         }
 
         val payload = mmkv.decodeString(id) ?: run {
-            Log.w(CredentialRepository.TAG, "No payload found for id: $id")
+            PasskeyLog.w(CredentialRepository.TAG, "No payload found for credential id")
             return null
         }
         val masterKey = getMasterKey(context) ?: run {
-            Log.e(CredentialRepository.TAG, "Master key not found")
+            PasskeyLog.e(CredentialRepository.TAG, "Master key not found")
             return null
         }
         return try {
             val json = KeystoreRecords.decodeLegacyRecord(payload, masterKey)
-            val metadata = json.optJSONObject("metadata")
-            val encJson = json.optJSONObject("privateKeyEnc")
-            
-            val privateKey = if (encJson != null && biometricCipher != null) {
-                Log.d(CredentialRepository.TAG, "Decrypting privateKey with biometricCipher")
-                val data = AndroidBase64.decode(encJson.getString("data"), AndroidBase64.DEFAULT)
-                val decrypted = biometricCipher.doFinal(data)
-                AndroidBase64.encodeToString(decrypted, AndroidBase64.DEFAULT)
-            } else if (json.has("privateKey")) {
-                Log.d(CredentialRepository.TAG, "Using plain privateKey from JSON")
-                AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("privateKey")), AndroidBase64.DEFAULT)
-            } else {
-                Log.w(CredentialRepository.TAG, "No privateKey found in JSON")
-                ""
-            }
-
-            Credential(
-                credentialId = json.getString("id"),
-                origin = metadata?.optString("origin") ?: json.optString("origin", ""),
-                userHandle = metadata?.optString("userHandle") ?: json.optString("userHandle", ""),
-                userId = metadata?.optString("userId") ?: json.optString("userId", ""),
-                publicKey = AndroidBase64.encodeToString(jsonArrayToByteArray(json.getJSONArray("publicKey")), AndroidBase64.DEFAULT),
-                privateKey = privateKey,
-                count = metadata?.optInt("count") ?: json.optInt("count", 0),
-                biometricIv = encJson?.optString("iv"),
-                parentKeyId = metadata?.optString("parentKeyId").takeUnless { it.isNullOrEmpty() },
-                derivationScheme = metadata?.optString("scheme").takeUnless { it.isNullOrEmpty() },
-                derivationVersion = metadata?.optInt("derivationVersion", PasskeyDerivation.VERSION_LEGACY_LABEL)
-                    ?: PasskeyDerivation.VERSION_LEGACY_LABEL,
-            )
+            credentialFromLegacyRecord(json, biometricCipher, includeMaterial)
         } catch (e: Exception) {
             null
         }
@@ -482,11 +564,11 @@ class Repository() : CredentialRepository {
 
                     KeyPair(publicKey, privateKey)
                 } else {
-                    Log.e(CredentialRepository.TAG, "Unrecognized key format: publicKey size=${publicKeyBytes.size}", e)
+                    PasskeyLog.e(CredentialRepository.TAG, "Unrecognized key format: publicKey size=${publicKeyBytes.size}", e)
                     null
                 }
             } catch (e2: Exception) {
-                Log.e(CredentialRepository.TAG, "Failed to restore key from raw bytes", e2)
+                PasskeyLog.e(CredentialRepository.TAG, "Failed to restore key from raw bytes", e2)
                 null
             }
         }
@@ -509,7 +591,7 @@ class Repository() : CredentialRepository {
                 credential.derivationScheme ?: KeystoreRecords.SCHEME_BIP32_ED25519,
             ).keyPair
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to re-derive key pair for ${credential.credentialId}", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to re-derive key pair for credential", e)
             null
         }
     }
@@ -527,13 +609,19 @@ class Repository() : CredentialRepository {
         userHandle: String,
         requestedScheme: String?,
     ): DerivedDomainKeyPair {
-        Log.d(CredentialRepository.TAG, "createDomainKeyPair for origin: $origin, userHandle: $userHandle, scheme: ${requestedScheme ?: "preferred"}")
+        PasskeyLog.d(CredentialRepository.TAG, "createDomainKeyPair (scheme: ${requestedScheme ?: "preferred"})")
         val resolved = resolveParentSecret(context, requestedScheme)
+        if (resolved is ParentSecretResult.MasterKeyUnavailable) {
+            // Typed so the create flow can report a definite failure to the
+            // relying party: without the master key nothing can be derived OR
+            // stored, and no amount of retrying from the UI changes that.
+            throw MasterKeyUnavailableException("Cannot derive a passkey: ${resolved.reason}")
+        }
         if (resolved !is ParentSecretResult.Available) {
             throw IllegalStateException("Cannot derive a passkey: ${resolved.reason}")
         }
         val parent = resolved.secret
-        Log.d(CredentialRepository.TAG, "deriving from parent ${parent.keyId} (${parent.scheme}, ${parent.bytes.size} bytes)")
+        PasskeyLog.d(CredentialRepository.TAG, "deriving from parent ${parent.keyId} (${parent.scheme}, ${parent.bytes.size} bytes)")
         return DerivedDomainKeyPair(
             keyPair = dP256.genDomainSpecificKeypair(parent.bytes, origin, userHandle.lowercase()),
             parentKeyId = parent.keyId,
@@ -595,7 +683,7 @@ class Repository() : CredentialRepository {
             return try {
                 JSONObject(plaintext)
             } catch (e: Exception) {
-                Log.w(CredentialRepository.TAG, "Unreadable metadata record for $id", e)
+                PasskeyLog.w(CredentialRepository.TAG, "Unreadable metadata record for $id", e)
                 null
             }
         }
@@ -603,7 +691,7 @@ class Repository() : CredentialRepository {
         return try {
             KeystoreRecords.decodeLegacyRecord(legacy, masterKey)
         } catch (e: Exception) {
-            Log.w(CredentialRepository.TAG, "Unreadable legacy record for $id", e)
+            PasskeyLog.w(CredentialRepository.TAG, "Unreadable legacy record for $id", e)
             null
         }
     }
@@ -618,7 +706,7 @@ class Repository() : CredentialRepository {
             return try {
                 KeystoreRecords.openMaterial(masterKey, sealed)
             } catch (e: Exception) {
-                Log.w(CredentialRepository.TAG, "Failed to open material for $id", e)
+                PasskeyLog.w(CredentialRepository.TAG, "Failed to open material for $id", e)
                 null
             }
         }
@@ -626,7 +714,7 @@ class Repository() : CredentialRepository {
         return try {
             KeystoreRecords.materialFromLegacyRecord(KeystoreRecords.decodeLegacyRecord(legacy, masterKey))
         } catch (e: Exception) {
-            Log.w(CredentialRepository.TAG, "Failed to read legacy material for $id", e)
+            PasskeyLog.w(CredentialRepository.TAG, "Failed to read legacy material for $id", e)
             null
         }
     }
@@ -671,18 +759,27 @@ class Repository() : CredentialRepository {
             val decodedBytes = AndroidBase64.decode(payload, AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP)
             return JSONObject(String(decodedBytes, Charsets.UTF_8))
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to decode payload", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to decode payload", e)
             throw e
         }
     }
 
     override fun saveMasterKey(context: Context, secret: ByteArray) {
+        // Reject a key that could never seal anything BEFORE touching storage, so
+        // a bad key does not replace a working one.
+        KeystoreRecords.verifySealRoundTrip(secret)
+
         // The master key arrives as raw bytes (the bridge no longer takes a hex
-        // String), so encrypt it straight into the Keychain.
-        try {
-            encryptToKeychain(context, secret)
-        } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to save master key to Keychain", e)
+        // String), so encrypt it straight into the Keychain. Nothing here is
+        // caught: a Keystore failure must reach the caller.
+        encryptToKeychain(context, secret)
+
+        // Prove the stored key reads back as what was given before reporting
+        // success — a silent readback failure would leave the wallet believing
+        // the key is in place while every later write fails.
+        val readBack = decryptFromKeychain(context)
+        check(readBack != null && readBack.contentEquals(secret)) {
+            "Master key did not read back from the Keychain after saving"
         }
     }
 
@@ -697,7 +794,7 @@ class Repository() : CredentialRepository {
                 null
             }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to get master key from Keychain", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to get master key from Keychain", e)
             null
         }
     }
@@ -748,7 +845,14 @@ class Repository() : CredentialRepository {
     }
 
     override fun isMasterKeyAvailable(context: Context): Boolean {
-        return getMasterKey(context) != null
+        val masterKey = getMasterKey(context) ?: return false
+        return try {
+            KeystoreRecords.verifySealRoundTrip(masterKey)
+            true
+        } catch (e: Exception) {
+            PasskeyLog.e(CredentialRepository.TAG, "Master key present but cannot seal/open a payload", e)
+            false
+        }
     }
 
     override fun saveMainKeyId(context: Context, id: String) {
@@ -805,18 +909,28 @@ class Repository() : CredentialRepository {
             ) { mmkvPasskeys.decodeString(it) }
             removable.forEach { mmkvPasskeys.removeValueForKey(it) }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Error clearing credentials and secrets", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Error clearing credentials and secrets", e)
         }
     }
 
     override fun deleteCredential(context: Context, credentialId: String) {
         try {
+            // The passkeys instance is the WALLET's key store. Whatever id the
+            // caller hands us, only a record that reads back as one of this
+            // module's own passkeys is removed — never a seed, root or account
+            // key that happens to live under that id.
             val mmkvPasskeys = getPasskeysMMKV(context)
-            for (candidateId in credentialIdCandidates(credentialId)) {
-                mmkvPasskeys.removeValueForKey(candidateId)
+            val removable = KeystoreRecords.keysToRemoveForDelete(
+                candidateIds = credentialIdCandidates(credentialId),
+                masterKey = getMasterKey(context),
+            ) { mmkvPasskeys.decodeString(it) }
+            if (removable.isEmpty()) {
+                PasskeyLog.w(CredentialRepository.TAG, "deleteCredential: no passkey record owned by this module matches; nothing removed")
+                return
             }
+            removable.forEach { mmkvPasskeys.removeValueForKey(it) }
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Error deleting credential", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Error deleting credential", e)
         }
     }
 
@@ -839,7 +953,7 @@ class Repository() : CredentialRepository {
             )
             mmkv.encode(id, KeystoreRecords.sealEnvelope(masterKey, base64urlJson))
         } catch (e: Exception) {
-            Log.e(CredentialRepository.TAG, "Failed to record credential usage", e)
+            PasskeyLog.e(CredentialRepository.TAG, "Failed to record credential usage", e)
         }
     }
 
@@ -886,7 +1000,7 @@ class Repository() : CredentialRepository {
         if (keyStore.containsAlias(CredentialRepository.BIOMETRIC_KEY_ALIAS) &&
             storedLevel != requirement.name
         ) {
-            Log.i(CredentialRepository.TAG, "Biometric requirement changed ($storedLevel -> ${requirement.name}); regenerating key")
+            PasskeyLog.i(CredentialRepository.TAG, "Biometric requirement changed ($storedLevel -> ${requirement.name}); regenerating key")
             keyStore.deleteEntry(CredentialRepository.BIOMETRIC_KEY_ALIAS)
         }
 
@@ -940,7 +1054,7 @@ class Repository() : CredentialRepository {
         } catch (e: NoSuchProviderException) {
             // Extremely unlikely on stock Android, but fall back to provider discovery
             // by key rather than by name so we never hand the key to BouncyCastle.
-            Log.w(CredentialRepository.TAG, "${CredentialRepository.ANDROID_KEYSTORE_CIPHER_PROVIDER} unavailable, falling back to default provider resolution", e)
+            PasskeyLog.w(CredentialRepository.TAG, "${CredentialRepository.ANDROID_KEYSTORE_CIPHER_PROVIDER} unavailable, falling back to default provider resolution", e)
             Cipher.getInstance("AES/GCM/NoPadding")
         }
     }

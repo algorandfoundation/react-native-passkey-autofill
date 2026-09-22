@@ -7,7 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.OutcomeReceiver
 import android.os.CancellationSignal
-import android.util.Log
+import co.algorand.passkeyautofill.utils.PasskeyLog
 import androidx.annotation.RequiresApi
 import androidx.credentials.exceptions.ClearCredentialException
 import androidx.credentials.exceptions.CreateCredentialException
@@ -29,6 +29,7 @@ import androidx.biometric.BiometricPrompt
 import co.algorand.passkeyautofill.auth.BiometricRequirement
 import co.algorand.passkeyautofill.credentials.CredentialRepository
 import co.algorand.passkeyautofill.credentials.Credential
+import co.algorand.passkeyautofill.credentials.RelyingParty
 import co.algorand.passkeyautofill.utils.PasskeyUtils
 import android.util.Base64 as AndroidBase64
 import com.tencent.mmkv.MMKV
@@ -66,7 +67,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                 MMKV.initialize(context)
                 MMKV.defaultMMKV()?.encode(KEY_LAST_INVOKED_AT_MS, System.currentTimeMillis())
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to stamp provider activation: ${e.message}")
+                PasskeyLog.w(TAG, "Failed to stamp provider activation: ${e.message}")
             }
         }
     }
@@ -79,6 +80,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginCreateCredentialResponse, CreateCredentialException>
     ) {
+        PasskeyLog.init(this)
         stampActivated(this)
         val response: BeginCreateCredentialResponse? = processCreateCredentialRequest(request)
         if (response != null) {
@@ -111,7 +113,9 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
     ): BeginCreateCredentialResponse {
         val createEntries: MutableList<CreateEntry> = mutableListOf()
         
-        // Ensure we have a master key available before offering to create a passkey
+        // Never offer to create a passkey unless the master key reads back AND
+        // proves it can seal/open a payload: saveCredential fails closed without
+        // it, so an entry here would only lead to a guaranteed failure.
         if (!credentialRepository.isMasterKeyAvailable(this)) {
             return BeginCreateCredentialResponse(createEntries)
         }
@@ -123,7 +127,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         
         val authenticatorSelection = pk.optJSONObject("authenticatorSelection")
         val userVerification = authenticatorSelection?.optString("userVerification") ?: "preferred"
-        Log.d(TAG, "handleCreatePasskeyQuery: userVerification=$userVerification")
+        PasskeyLog.d(TAG, "handleCreatePasskeyQuery: userVerification=$userVerification")
 
         val action = credentialRepository.getCreatePasskeyAction(this) ?: DEFAULT_CREATE_PASSKEY_ACTION
 
@@ -146,9 +150,9 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                     biometricPromptDataBuilder.setCryptoObject(BiometricPrompt.CryptoObject(cipher))
                 }
                 builder.setBiometricPromptData(biometricPromptDataBuilder.build())
-                Log.d(TAG, "Set BiometricPromptData for CreateEntry")
+                PasskeyLog.d(TAG, "Set BiometricPromptData for CreateEntry")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to set BiometricPromptData for CreateEntry", e)
+                PasskeyLog.e(TAG, "Failed to set BiometricPromptData for CreateEntry", e)
             }
         }
         
@@ -164,12 +168,13 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginGetCredentialResponse, GetCredentialException>,
     ) {
+        PasskeyLog.init(this)
         stampActivated(this)
         try {
             val response = processGetCredentialRequest(request)
             callback.onResult(response)
         } catch (e: Exception) {
-            Log.e(TAG, "Error in onBeginGetCredentialRequest", e)
+            PasskeyLog.e(TAG, "Error in onBeginGetCredentialRequest", e)
             callback.onError(GetCredentialUnknownException())
         }
     }
@@ -190,6 +195,17 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
         val action = credentialRepository.getGetPasskeyAction(this) ?: DEFAULT_GET_PASSKEY_ACTION
         val allEntries = mutableListOf<PublicKeyCredentialEntry>()
 
+        // A native caller that names no rpId is scoped to its own signing
+        // identity, the same origin a credential it created was stored under.
+        val callingOrigin = request.callingAppInfo?.let { info ->
+            try {
+                credentialRepository.getOrigin(info)
+            } catch (e: Exception) {
+                PasskeyLog.w(TAG, "Could not derive the calling app's origin", e)
+                null
+            }
+        }
+
         for (option in request.beginGetCredentialOptions) {
             if (option !is BeginGetPublicKeyCredentialOption) continue
 
@@ -201,10 +217,21 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                 val pk = if (json.has("publicKey")) json.getJSONObject("publicKey") else json
                 allowCredentials = pk.optJSONArray("allowCredentials")
                 userVerification = pk.optString("userVerification", "preferred")
-                Log.d(TAG, "handleGetPasskeyQuery: userVerification=$userVerification")
+                PasskeyLog.d(TAG, "handleGetPasskeyQuery: userVerification=$userVerification")
             } catch (e: Exception) {
-                Log.e(TAG, "Error parsing requestJson", e)
+                PasskeyLog.e(TAG, "Error parsing requestJson", e)
             }
+
+            // Discoverable credentials are strictly RP-scoped: only credentials
+            // created for the requesting relying party are ever offered, whether
+            // or not allowCredentials narrows them further. No relying party, no
+            // entries.
+            val requestedRpId = RelyingParty.effectiveRpId(requestJsonStr, callingOrigin)
+            if (requestedRpId == null) {
+                PasskeyLog.w(TAG, "Get request names no relying party; offering no entries")
+                continue
+            }
+            val scopedCredentials = credentials.filter { RelyingParty.matches(it.origin, requestedRpId) }
 
             val allowedIds = if (allowCredentials != null && allowCredentials.length() > 0) {
                 val ids = mutableSetOf<String>()
@@ -216,7 +243,7 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                 null
             }
 
-            for (credential in credentials) {
+            for (credential in scopedCredentials) {
                 if (allowedIds != null) {
                     val isAllowed = allowedIds.any { allowedId ->
                         allowedId == credential.credentialId ||
@@ -262,21 +289,21 @@ class PasskeyAutofillCredentialProviderService: CredentialProviderService() {
                                         val cipher = credentialRepository.getBiometricCipherForEncryption(this, requirement)
                                         biometricPromptDataBuilder.setCryptoObject(BiometricPrompt.CryptoObject(cipher))
                                     } catch (e: Exception) {
-                                        Log.d(TAG, "Could not get encryption cipher for Single Tap: ${e.message}")
+                                        PasskeyLog.d(TAG, "Could not get encryption cipher for Single Tap: ${e.message}")
                                     }
                                 }
                             }
 
                             entryBuilder.setBiometricPromptData(biometricPromptDataBuilder.build())
-                            Log.d(TAG, "Set BiometricPromptData for entry ${credential.userHandle}")
+                            PasskeyLog.d(TAG, "Set BiometricPromptData for entry")
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to set BiometricPromptData for entry", e)
+                            PasskeyLog.e(TAG, "Failed to set BiometricPromptData for entry", e)
                         }
                     }
 
                     allEntries.add(entryBuilder.build())
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error building PublicKeyCredentialEntry", e)
+                    PasskeyLog.e(TAG, "Error building PublicKeyCredentialEntry", e)
                 }
             }
         }

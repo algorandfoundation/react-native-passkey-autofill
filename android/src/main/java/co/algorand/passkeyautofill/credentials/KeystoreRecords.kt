@@ -105,6 +105,28 @@ object KeystoreRecords {
         return AndroidBase64.decode(obj.getString("\$u8"), AndroidBase64.DEFAULT)
     }
 
+    /** Master key length: the wallet's keystore generates a 32-byte (AES-256) key. */
+    const val MASTER_KEY_LENGTH = 32
+
+    /**
+     * Proves that `masterKey` can seal AND open a payload before anything is
+     * trusted to it: a fresh random probe goes through [sealEnvelope] and
+     * [openEnvelope] and must come back intact. Throws on a wrong-length key,
+     * a broken cipher provider, or a mismatched round trip. Used when the
+     * master key is stored and again before a `CreateEntry` is offered, so a
+     * key that cannot encrypt never reaches a credential write.
+     */
+    fun verifySealRoundTrip(masterKey: ByteArray) {
+        require(masterKey.size == MASTER_KEY_LENGTH) {
+            "Master key must be $MASTER_KEY_LENGTH bytes (AES-256), got ${masterKey.size}"
+        }
+        val probe = ByteArray(32)
+        SecureRandom().nextBytes(probe)
+        val plaintext = AndroidBase64.encodeToString(probe, AndroidBase64.NO_WRAP)
+        val opened = openEnvelope(masterKey, sealEnvelope(masterKey, plaintext))
+        check(opened == plaintext) { "Master key seal/open round trip did not reproduce the probe" }
+    }
+
     /**
      * Seals `plaintext` with `masterKey` in the NEW `{iv, content}` envelope:
      * a fresh 96-bit IV, AES-256-GCM, tag appended to the ciphertext. Mirrors
@@ -210,6 +232,56 @@ object KeystoreRecords {
             removable.add(key)
             if (key.startsWith(METADATA_PREFIX)) {
                 removable.add(materialKey(key.removePrefix(METADATA_PREFIX)))
+            }
+        }
+        return removable
+    }
+
+    /**
+     * Decides which keys of the SHARED passkeys MMKV instance a "delete
+     * credential" call may remove for the credential known under any of
+     * `candidateIds` (the same id in its several historical encodings).
+     *
+     * The instance also holds the wallet's seeds, roots and account keys under
+     * ids a caller could pass by mistake, so a candidate is only removed once
+     * its record has been read and positively identified as one of THIS
+     * MODULE's passkey types ([isPasskeyRecordType]) — under either layout. A
+     * sealed legacy record that cannot be opened (no `masterKey`, or the wrong
+     * one) is left alone rather than guessed at, exactly like [keysToRemoveForClear].
+     *
+     * @param candidateIds every encoding the credential id may be stored under.
+     * @param masterKey needed to open sealed legacy flat records.
+     * @param payloadFor reads the raw stored payload for a key, `null` if absent.
+     */
+    fun keysToRemoveForDelete(
+        candidateIds: Set<String>,
+        masterKey: ByteArray?,
+        payloadFor: (String) -> String?,
+    ): List<String> {
+        val removable = mutableListOf<String>()
+        for (id in candidateIds) {
+            // A caller cannot address a `k/` or `m/` entry directly.
+            if (id.startsWith(METADATA_PREFIX) || id.startsWith(MATERIAL_PREFIX)) continue
+
+            payloadFor(metadataKey(id))?.let { metadata ->
+                val type = try {
+                    JSONObject(metadata).optString("type", "")
+                } catch (e: Exception) {
+                    ""
+                }
+                if (isPasskeyRecordType(type)) {
+                    removable.add(metadataKey(id))
+                    removable.add(materialKey(id))
+                }
+            }
+
+            payloadFor(id)?.let { legacy ->
+                val type = try {
+                    decodeLegacyRecord(legacy, masterKey).optString("type", "")
+                } catch (e: Exception) {
+                    ""
+                }
+                if (isPasskeyRecordType(type)) removable.add(id)
             }
         }
         return removable

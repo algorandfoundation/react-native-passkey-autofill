@@ -59,6 +59,7 @@ class GetPasskeyActivity : AppCompatActivity() {
     private var bundleRequestJson: String? = null
     private var request: ProviderGetCredentialRequest? = null
     private var biometricPromptResult: Any? = null
+
     /** The system's Credential Manager prompt ran for this operation and succeeded. */
     private var systemVerified: Boolean = false
     private var systemUnlockedCipher: javax.crypto.Cipher? = null

@@ -36,11 +36,12 @@ object UserVerification {
      * Normalises the request's `userVerification`; unknown or absent values
      * read as `preferred`, the WebAuthn default.
      */
-    fun normalize(requested: String?): String = when (requested?.trim()?.lowercase()) {
-        REQUIRED -> REQUIRED
-        DISCOURAGED -> DISCOURAGED
-        else -> PREFERRED
-    }
+    fun normalize(requested: String?): String =
+        when (requested?.trim()?.lowercase()) {
+            REQUIRED -> REQUIRED
+            DISCOURAGED -> DISCOURAGED
+            else -> PREFERRED
+        }
 
     /**
      * @param requested the request's `userVerification`.
@@ -48,6 +49,9 @@ object UserVerification {
      *   operation reports success (Single Tap flow).
      * @param manualVerified a `BiometricPrompt` this activity showed succeeded.
      */
-    fun outcome(requested: String?, systemVerified: Boolean, manualVerified: Boolean): Outcome =
-        Outcome(normalize(requested), verified = systemVerified || manualVerified)
+    fun outcome(
+        requested: String?,
+        systemVerified: Boolean,
+        manualVerified: Boolean,
+    ): Outcome = Outcome(normalize(requested), verified = systemVerified || manualVerified)
 }

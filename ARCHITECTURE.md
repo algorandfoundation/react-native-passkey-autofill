@@ -76,7 +76,6 @@ Encryption is a precondition, not a best effort. On Android, `setMasterKey` reje
 
 The `UV` bit in `authenticatorData` is only set when a user-verification ceremony ran for that operation (`auth/UserVerification.kt`). Both activities track whether the system's Credential Manager prompt reported success and whether a `BiometricPrompt` they showed succeeded, and derive the flag from those two facts when the response is built. A request with `userVerification: "required"` runs a manual prompt whenever the system did not verify, and fails if no ceremony completes; `preferred` and `discouraged` may proceed without one, with `UV` clear. `UP` stays set, since choosing the entry in the system chooser is the presence gesture.
 
-
 ## End-to-End Tests
 
 The `e2e/` workspace drives the `example/` app with Appium 2 + WebdriverIO, executed through Jest. The Android job uses the UiAutomator2 driver; the iOS job uses XCUITest. The happy-path spec mirrors the example and exercises passkey registration and assertion against `https://debug.liquidauth.com`. See [`e2e/README.md`](./e2e/README.md) for local usage and the [`E2E` workflow](./.github/workflows/e2e.yml) for CI.

@@ -56,6 +56,31 @@ object WebAuthn {
         return Base64.encodeToString(bytes, BASE64_FLAGS)
     }
 
+    /**
+     * Extracts the raw `authData` bytes from a base64url-encoded attestationObject.
+     * Returns null when the structure cannot be parsed.
+     */
+    fun extractAuthData(attestationObjectBytes: ByteArray): ByteArray? {
+        return try {
+            val c = Cursor(attestationObjectBytes)
+            val (major, count) = readHead(c)
+            require(major == 5) { "attestationObject is not a CBOR map" }
+            repeat(count.toInt()) {
+                val key = readTextString(c)
+                if (key == "authData") {
+                    val (valueMajor, valueLen) = readHead(c)
+                    require(valueMajor == 2) { "authData is not a CBOR byte string" }
+                    val s = c.pos
+                    return attestationObjectBytes.copyOfRange(s, s + valueLen.toInt())
+                }
+                skipItem(c)
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun uuidToBytes(uuid: UUID): ByteArray =
         ByteBuffer.allocate(AAGUID_LENGTH)
             .putLong(uuid.mostSignificantBits)
